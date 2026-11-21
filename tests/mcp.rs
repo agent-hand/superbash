@@ -277,3 +277,67 @@ async fn server_exit_stops_running_background() {
     })
     .await;
 }
+
+/// 生の HTTP/1.1 で `POST <path>`（initialize）を送り、status 行の code を返す。
+async fn post_status(addr: std::net::SocketAddr, path: &str, extra: &[(&str, &str)]) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-03-26","capabilities":{},
+        "clientInfo":{"name":"raw","version":"0"}}})
+    .to_string();
+    let mut headers = vec![
+        ("Host", addr.to_string()),
+        ("Content-Type", "application/json".into()),
+        ("Accept", "application/json, text/event-stream".into()),
+        ("Content-Length", body.len().to_string()),
+        ("Connection", "close".into()),
+    ];
+    headers.retain(|(k, _)| !extra.iter().any(|(e, _)| e.eq_ignore_ascii_case(k)));
+    headers.extend(extra.iter().map(|(k, v)| (*k, v.to_string())));
+    let mut req = format!("POST {path} HTTP/1.1\r\n");
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    req.push_str("\r\n");
+    req.push_str(&body);
+
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut head = vec![0u8; 12];
+    s.read_exact(&mut head).await.unwrap();
+    // "HTTP/1.1 200"
+    String::from_utf8(head).unwrap()[9..12].parse().unwrap()
+}
+
+#[tokio::test]
+async fn http_endpoint_origin_and_host_checks() {
+    let sb = Sandbox::new("mcp-origin");
+    let server = start_server(&sb, demo(), None).await;
+    let addr = server.addr;
+    assert!(addr.ip().is_loopback());
+
+    // Origin 無し（非 browser の client）と、loopback の Origin は通る
+    assert_eq!(post_status(addr, "/mcp", &[]).await, 200);
+    let local = format!("http://localhost:{}", addr.port());
+    assert_eq!(post_status(addr, "/mcp", &[("Origin", &local)]).await, 200);
+    let ip = format!("http://127.0.0.1:{}", addr.port());
+    assert_eq!(post_status(addr, "/mcp", &[("Origin", &ip)]).await, 200);
+
+    // 別の Origin・壊れた Origin は 403（DNS rebinding・cross-origin の対策）
+    for origin in ["http://evil.example", "https://localhost:1", "null", "x"] {
+        assert_eq!(
+            post_status(addr, "/mcp", &[("Origin", origin)]).await,
+            403,
+            "Origin: {origin}"
+        );
+    }
+    // loopback 以外の Host は 403
+    assert_eq!(
+        post_status(addr, "/mcp", &[("Host", "evil.example")]).await,
+        403
+    );
+    // endpoint は /mcp だけ
+    assert_eq!(post_status(addr, "/other", &[]).await, 404);
+    server.stop().await;
+}

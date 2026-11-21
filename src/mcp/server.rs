@@ -1,4 +1,4 @@
-//! MCP server（stdio）。道具は `superbash-command` 1 つ（設計 6 章）。
+//! MCP server（Streamable HTTP のサービスが包む処理本体）。道具は `superbash-command` 1 つ（設計 6 章）。
 
 use std::fmt::Write as _;
 use std::sync::Arc;
