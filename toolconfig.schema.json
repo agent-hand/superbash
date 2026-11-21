@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "toolconfig.schema.json",
+  "title": "superbash toolconfig",
+  "description": "toolset の定義（.manifest/toolconfig.json）。設計 docs/superbash-design.md の 3 章。",
+  "type": "object",
+  "required": ["name", "tools", "commands"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "owner": { "type": "object", "properties": { "name": { "type": "string" } } },
+    "tools": {
+      "description": "key は tools/<name>/ の <name>（bin の名前にもなる）",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/tool" }
+    },
+    "commands": { "type": "array", "items": { "$ref": "#/definitions/command" } }
+  },
+  "definitions": {
+    "tool": {
+      "type": "object",
+      "required": ["entry"],
+      "properties": {
+        "entry": { "description": "tools/<name>/ からの相対 path の入口", "type": "string", "minLength": 1 }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": ["name", "tool", "spec"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "tool": { "description": "tools の key", "type": "string" },
+        "version": { "type": "string" },
+        "spec": { "$ref": "#/definitions/spec" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "subcommand": { "description": "使う副 command の名前（help は必須で持つ）", "type": "string" },
+        "usage": { "type": "string" },
+        "in": { "$ref": "#/definitions/in" },
+        "out": { "$ref": "#/definitions/out" }
+      }
+    },
+    "in": {
+      "description": "wrapper は subcommand、options（書いた順）、positionals（書いた順）の順に argv を組む",
+      "type": "object",
+      "properties": {
+        "options": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["flag", "type"],
+            "properties": {
+              "flag": { "description": "boolean は true の時だけ flag を出す。string・number は flag と値の 2 引数", "type": "string" },
+              "type": { "enum": ["boolean", "string", "number"] },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "positionals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "enum": ["string", "number"] },
+              "description": { "type": "string" },
+              "optional": { "type": "boolean", "default": false }
+            }
+          }
+        }
+      }
+    },
+    "out": {
+      "type": "object",
+      "properties": {
+        "stdout": {
+          "type": "object",
+          "properties": { "format": { "type": "string" }, "description": { "type": "string" } }
+        },
+        "stderr": { "type": "string" },
+        "exitCodes": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    }
+  }
+}

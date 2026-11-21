@@ -1,0 +1,71 @@
+{
+  "name": "example-tools",
+  "description": "test 用の toolset",
+  "owner": { "name": "example" },
+  "tools": {
+    "lint-cli": { "entry": "main.js" },
+    "count-cli": { "entry": "main.js" }
+  },
+  "commands": [
+    {
+      "name": "lint",
+      "description": "lint を走らせる。target を指定すると、その下だけ。",
+      "category": "check",
+      "tool": "lint-cli",
+      "version": "2.4.0",
+      "spec": {
+        "subcommand": "check",
+        "usage": "lint-cli check [--fix] [<target>]",
+        "in": {
+          "options": {
+            "fix": { "flag": "--fix", "type": "boolean", "description": "直せる物を直す" }
+          },
+          "positionals": [
+            { "name": "target", "type": "string", "description": "対象の dir。省略時は cwd", "optional": true }
+          ]
+        },
+        "out": {
+          "stdout": { "format": "text", "description": "argv を JSON で 1 行" },
+          "stderr": "無し",
+          "exitCodes": { "0": "問題なし" }
+        }
+      }
+    },
+    {
+      "name": "lint-list",
+      "description": "lint の規則の一覧（lint と同じ tool を使う）。",
+      "category": "check",
+      "tool": "lint-cli",
+      "version": "2.4.0",
+      "spec": {
+        "subcommand": "list",
+        "usage": "lint-cli list"
+      }
+    },
+    {
+      "name": "count",
+      "description": "語を数える。",
+      "category": "text",
+      "tool": "count-cli",
+      "version": "0.3.0",
+      "spec": {
+        "subcommand": "tally",
+        "usage": "count-cli tally [--limit <n>] [--label <s>] <text> [<more>]",
+        "in": {
+          "options": {
+            "limit": { "flag": "--limit", "type": "number", "description": "上限" },
+            "label": { "flag": "--label", "type": "string", "description": "表示名" }
+          },
+          "positionals": [
+            { "name": "text", "type": "string", "description": "数える文字列" },
+            { "name": "more", "type": "string", "description": "追加の文字列", "optional": true }
+          ]
+        },
+        "out": {
+          "stdout": { "format": "json", "description": "argv を JSON で 1 行" },
+          "exitCodes": { "0": "成功" }
+        }
+      }
+    }
+  ]
+}
