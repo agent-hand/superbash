@@ -1,0 +1,42 @@
+name: dist
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  npx-smoke:
+    name: ${{ matrix.key }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: darwin-arm64, runner: macos-15 }
+          - { key: darwin-x64, runner: macos-15-intel }
+          - { key: linux-x64, runner: ubuntu-24.04 }
+          - { key: linux-arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: build
+        run: cargo build --release --locked
+      - name: npm pack した tarball から npx で起動して MCP を通す
+        run: node scripts/npx-smoke.mjs target/release/superbash "$RUNNER_TEMP/smoke"
+      - name: verdaccio を入れる（使い捨ての registry 用。入れるだけで publish はしない）
+        run: npm install --prefix "$RUNNER_TEMP/verdaccio-tool" verdaccio@6 --no-audit --no-fund
+      - name: 使い捨ての registry（127.0.0.1 の verdaccio）で toolset と本体 package の試験
+        run: node scripts/registry-e2e.mjs target/release/superbash "$RUNNER_TEMP/registry-e2e" "$RUNNER_TEMP/verdaccio-tool/node_modules/verdaccio/bin/verdaccio"
+      - name: verdaccio を止める
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/registry-e2e/verdaccio.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/registry-e2e/verdaccio.pid")" 2>/dev/null || true
+          fi

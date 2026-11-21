@@ -1,0 +1,16 @@
+{
+  "name": "superbash",
+  "version": "0.1.0",
+  "description": "toolset の command だけを MCP の道具として出す",
+  "license": "UNLICENSED",
+  "repository": { "type": "git", "url": "git+https://github.com/unagents/superbash.git" },
+  "bin": { "superbash": "bin/superbash.js" },
+  "files": ["bin/superbash.js"],
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {
+    "superbash-darwin-arm64": "0.1.0",
+    "superbash-darwin-x64": "0.1.0",
+    "superbash-linux-arm64": "0.1.0",
+    "superbash-linux-x64": "0.1.0"
+  }
+}

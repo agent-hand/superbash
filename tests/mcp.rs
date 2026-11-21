@@ -6,66 +6,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::*;
-use rmcp::ServiceExt;
-use rmcp::model::{CallToolRequestParams, CallToolResult};
-use rmcp::service::{RoleClient, RunningService};
-use rmcp::transport::TokioChildProcess;
+use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
-use tokio::process::Command;
-
-type Client = RunningService<RoleClient, ()>;
 
 fn demo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/demo-tools")
 }
 
-async fn start(sb: &Sandbox, toolset: &Path, allow: Option<&str>) -> Client {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_superbash"));
-    cmd.env_clear()
-        .env("PATH", std::env::var_os("PATH").unwrap());
-    for (k, v) in sb.env() {
-        cmd.env(k, v);
-    }
-    cmd.current_dir(&sb.root);
-    if let Some(a) = allow {
-        cmd.arg("--allow-cmd").arg(a);
-    }
-    cmd.arg(toolset);
-    ().serve(TokioChildProcess::new(cmd).unwrap())
-        .await
-        .expect("initialize")
-}
-
-fn text(r: &CallToolResult) -> String {
-    r.content
-        .iter()
-        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-async fn call(c: &Client, args: Value) -> CallToolResult {
-    let Value::Object(m) = args else { panic!() };
-    c.call_tool(CallToolRequestParams::new("superbash-command").with_arguments(m))
-        .await
-        .expect("tools/call")
-}
-
-async fn description(c: &Client) -> String {
-    let tools = c.list_tools(None).await.expect("tools/list").tools;
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0].name, "superbash-command");
-    tools[0].description.clone().unwrap().to_string()
-}
-
-fn is_error(r: &CallToolResult) -> bool {
-    r.is_error == Some(true)
-}
-
 #[tokio::test]
 async fn initialize_list_and_call() {
     let sb = Sandbox::new("mcp-basic");
-    let c = start(&sb, &demo(), None).await;
+    let c = start(&sb, demo(), None).await;
     assert_eq!(
         c.peer_info().unwrap().server_info.as_ref().unwrap().name,
         "superbash"
@@ -113,7 +64,7 @@ async fn allow_cmd_changes_runnable_commands() {
     let sb = Sandbox::new("mcp-allow");
 
     // 指定無し: 全部
-    let c = start(&sb, &demo(), None).await;
+    let c = start(&sb, demo(), None).await;
     let d = description(&c).await;
     for n in ["hello", "fail", "nap"] {
         assert!(d.contains(&format!("name: {n}")), "{d}");
@@ -130,7 +81,7 @@ async fn allow_cmd_changes_runnable_commands() {
     c.cancel().await.unwrap();
 
     // 一覧: その command だけ
-    let c = start(&sb, &demo(), Some("hello,fail")).await;
+    let c = start(&sb, demo(), Some("hello,fail")).await;
     let d = description(&c).await;
     assert!(d.contains("name: hello") && d.contains("name: fail"));
     assert!(!d.contains("name: nap"), "{d}");
@@ -142,7 +93,7 @@ async fn allow_cmd_changes_runnable_commands() {
     c.cancel().await.unwrap();
 
     // '': 無し。起動はでき、全部 error
-    let c = start(&sb, &demo(), Some("")).await;
+    let c = start(&sb, demo(), Some("")).await;
     let d = description(&c).await;
     assert!(d.contains("実行できる command は無い"), "{d}");
     for n in ["hello", "nap", "nope"] {
@@ -155,7 +106,7 @@ async fn allow_cmd_changes_runnable_commands() {
 #[tokio::test]
 async fn timeout_stops_and_returns_output_so_far() {
     let sb = Sandbox::new("mcp-timeout");
-    let c = start(&sb, &demo(), None).await;
+    let c = start(&sb, demo(), None).await;
     // npx の初回の展開を済ませておく（timeout の中に入れない）
     let r = call(&c, json!({"name": "nap", "args": {"ms": 1}})).await;
     assert!(text(&r).contains("finished"), "{}", text(&r));
@@ -177,10 +128,15 @@ async fn timeout_stops_and_returns_output_so_far() {
     c.cancel().await.unwrap();
 }
 
+/// 状態 file を読む（まだ無い・途中なら None）。
+fn read_status(path: &Path) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
 #[tokio::test]
 async fn background_returns_id_and_readable_output() {
     let sb = Sandbox::new("mcp-bg");
-    let c = start(&sb, &demo(), None).await;
+    let c = start(&sb, demo(), None).await;
     call(&c, json!({"name": "nap", "args": {"ms": 1}})).await; // 初回の展開
 
     let r = call(
@@ -196,14 +152,17 @@ async fn background_returns_id_and_readable_output() {
     assert!(id.starts_with("bg-"));
     assert!(out.starts_with(sb.cache()), "{}", out.display());
 
-    // 終わるまでの時間は 1 回だけ待つ（npx の起動を含めても十分な長さ）
-    tokio::time::sleep(Duration::from_secs(8)).await;
+    // 状態が running でなくなるのを観測して待つ
+    wait_until("background の終了", Duration::from_secs(60), || {
+        read_status(&status).is_some_and(|s| s["state"] != "running")
+    })
+    .await;
     let output = std::fs::read_to_string(&out).unwrap();
     assert!(
         output.contains("started") && output.contains("finished"),
         "{output}"
     );
-    let st: Value = serde_json::from_str(&std::fs::read_to_string(&status).unwrap()).unwrap();
+    let st = read_status(&status).unwrap();
     assert_eq!(
         (st["state"].as_str(), st["exit_code"].as_i64()),
         (Some("exited"), Some(0))
@@ -215,7 +174,7 @@ async fn background_returns_id_and_readable_output() {
 #[tokio::test]
 async fn background_ignores_timeout() {
     let sb = Sandbox::new("mcp-bg-no-timeout");
-    let c = start(&sb, &demo(), None).await;
+    let c = start(&sb, demo(), None).await;
     call(&c, json!({"name": "nap", "args": {"ms": 1}})).await;
     // timeout 1000ms より長く（約 3 秒）走る background は、止まらずに最後まで走る
     let r = call(
@@ -226,8 +185,11 @@ async fn background_ignores_timeout() {
     let sc = r.structured_content.unwrap();
     let out = PathBuf::from(sc["output_path"].as_str().unwrap());
     let status = PathBuf::from(sc["status_path"].as_str().unwrap());
-    tokio::time::sleep(Duration::from_secs(9)).await;
-    let st: Value = serde_json::from_str(&std::fs::read_to_string(&status).unwrap()).unwrap();
+    wait_until("background の終了", Duration::from_secs(60), || {
+        read_status(&status).is_some_and(|s| s["state"] != "running")
+    })
+    .await;
+    let st = read_status(&status).unwrap();
     assert_eq!(
         (st["state"].as_str(), st["exit_code"].as_i64()),
         (Some("exited"), Some(0)),
@@ -240,4 +202,69 @@ async fn background_ignores_timeout() {
         "{output}"
     );
     c.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn background_does_not_validate_timeout() {
+    let sb = Sandbox::new("mcp-bg-bad-timeout");
+    let c = start(&sb, demo(), None).await;
+    // background の時は timeout を見ない（型が不正でも error にしない）
+    let r = call(
+        &c,
+        json!({"name": "nap", "args": {"ms": 1}, "run_in_background": true, "timeout": "x"}),
+    )
+    .await;
+    assert!(!is_error(&r), "{}", text(&r));
+    let status = PathBuf::from(
+        r.structured_content.unwrap()["status_path"]
+            .as_str()
+            .unwrap(),
+    );
+    wait_until("background の終了", Duration::from_secs(60), || {
+        read_status(&status).is_some_and(|s| s["state"] != "running")
+    })
+    .await;
+    // foreground では、不正な timeout は error のまま
+    let r = call(
+        &c,
+        json!({"name": "nap", "args": {"ms": 1}, "timeout": "x"}),
+    )
+    .await;
+    assert!(is_error(&r) && text(&r).contains("timeout"), "{}", text(&r));
+    c.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn server_exit_stops_running_background() {
+    let sb = Sandbox::new("mcp-bg-server-exit");
+    let c = start(&sb, demo(), None).await;
+    call(&c, json!({"name": "nap", "args": {"ms": 1}})).await; // 初回の展開
+
+    let r = call(
+        &c,
+        json!({"name": "nap", "args": {"ms": 600000}, "run_in_background": true}),
+    )
+    .await;
+    let sc = r.structured_content.unwrap();
+    let out = PathBuf::from(sc["output_path"].as_str().unwrap());
+    // command が走り出し、pid を出力するまで待つ
+    let pid = wait_for(
+        "background の command の pid",
+        Duration::from_secs(60),
+        || {
+            std::fs::read_to_string(&out)
+                .ok()?
+                .lines()
+                .find_map(|l| l.strip_prefix("pid ")?.trim().parse::<i32>().ok())
+        },
+    )
+    .await;
+    assert!(process_alive(pid), "起動直後に pid {pid} が居ない");
+
+    // client が閉じる = server の終了
+    c.cancel().await.unwrap();
+    wait_until("background の停止", Duration::from_secs(30), || {
+        !process_alive(pid)
+    })
+    .await;
 }

@@ -10,6 +10,7 @@ if (sub === 'hello') {
 } else if (sub === 'nap') {
   const ms = Number(rest[rest.indexOf('--ms') + 1]);
   console.log('started');
+  console.log(`pid ${process.pid}`);
   setTimeout(() => console.log('finished'), ms);
 } else {
   console.error(`unknown subcommand: ${sub}`);

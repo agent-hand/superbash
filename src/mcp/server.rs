@@ -91,13 +91,6 @@ impl SuperbashServer {
             Some(v @ Value::Object(_)) => v.to_string(),
             Some(_) => return error_result("args は JSON の object"),
         };
-        let timeout = match args.get("timeout") {
-            None | Some(Value::Null) => resolve_timeout(None),
-            Some(v) => match v.as_u64() {
-                Some(ms) => resolve_timeout(Some(ms)),
-                None => return error_result("timeout はミリ秒の整数"),
-            },
-        };
         let background = args
             .get("run_in_background")
             .and_then(Value::as_bool)
@@ -123,6 +116,14 @@ impl SuperbashServer {
                 Err(e) => error_result(&format!("起動できない: {e:#}")),
             };
         }
+        // timeout は foreground の時だけ見る（background の時は検証もしない）
+        let timeout = match args.get("timeout") {
+            None | Some(Value::Null) => resolve_timeout(None),
+            Some(v) => match v.as_u64() {
+                Some(ms) => resolve_timeout(Some(ms)),
+                None => return error_result("timeout はミリ秒の整数"),
+            },
+        };
         match runner.run(name, &args_json, timeout).await {
             Ok(o) => outcome_result(o),
             Err(e) => error_result(&format!("実行できない: {e:#}")),
