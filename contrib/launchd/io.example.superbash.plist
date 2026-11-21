@@ -21,6 +21,10 @@
     <string>7391</string>
   </array>
 
+  <!-- server の起動 dir。command の作業 dir はここになる（省略すると /）。 -->
+  <key>WorkingDirectory</key>
+  <string>/path/to/workdir</string>
+
   <!-- npx は node を PATH から探す。node の bin の dir を含める。 -->
   <key>EnvironmentVariables</key>
   <dict>

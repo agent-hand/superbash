@@ -21,6 +21,10 @@ client の設定（Claude Code の例）:
 { "mcpServers": { "superbash": { "type": "http", "url": "http://127.0.0.1:7391/mcp" } } }
 ```
 
+### command の作業 dir
+
+`superbash-command` に作業 dir の引数は無い。http の server では、command の作業 dir は **server を起動した dir** になる。「省略時は今の dir」の command は、その dir で動く。dir が要る時は、command の引数で path を渡す（設計 4 章 3）。
+
 ### 既定の port（7391）の理由
 
 固定の 1 つにして、client の設定に書いておけるようにした。他の道具とぶつかりにくい番号として、次を満たす物を選んだ。
@@ -44,6 +48,8 @@ user agent として常駐させる雛形が [contrib/launchd/io.example.superba
 2. `~/Library/LaunchAgents/<Label>.plist` に置く。
 3. 読み込む: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<Label>.plist`
 4. 外す: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/<Label>.plist`
+
+作業 dir（plist の `WorkingDirectory`）: launchd が server を起動する dir になり、そのまま command の作業 dir になる。雛形では `/path/to/workdir` を placeholder にしてある。command を動かしたい dir（例: 作業の repo を置いた dir）に書き換える。省略すると launchd の既定（`/`）になり、「省略時は今の dir」の command は `/` で動くので、既定の作業 dir を決めたいなら必ず指定する。
 
 （古い書き方では `launchctl load <plist>` と `launchctl unload <plist>`。）起動したかは log の address の 1 行で分かる。
 
