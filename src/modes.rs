@@ -48,11 +48,10 @@ pub fn prepare(
     result
 }
 
-/// MCP の mode（既定）。stdio で MCP server として動く。
-pub fn mcp(npm: &Npm, toolset: &str, allow: &AllowCmd) -> Result<()> {
-    use rmcp::ServiceExt;
-
+/// MCP の mode（既定）。Streamable HTTP の MCP server として `host:port` で待ち受ける（path は /mcp）。
+pub fn mcp(npm: &Npm, toolset: &str, allow: &AllowCmd, host: &str, port: u16) -> Result<()> {
     use crate::mcp::exec::Runner;
+    use crate::mcp::http;
     use crate::mcp::server::SuperbashServer;
 
     let generated = prepare(npm, toolset, allow, true)?;
@@ -67,14 +66,7 @@ pub fn mcp(npm: &Npm, toolset: &str, allow: &AllowCmd) -> Result<()> {
     let server = SuperbashServer::new(commands, runner);
 
     let rt = tokio::runtime::Runtime::new().context("tokio を起動できない")?;
-    rt.block_on(async {
-        let running = server
-            .serve(rmcp::transport::stdio())
-            .await
-            .context("MCP server を起動できない")?;
-        running.waiting().await.context("MCP server が異常終了")?;
-        Ok(())
-    })
+    rt.block_on(http::serve(server, host, port))
 }
 
 /// `--only-install`（wrapper 無しで生成し、置き場の dir で npm link する）。

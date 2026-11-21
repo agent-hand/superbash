@@ -1,15 +1,15 @@
 {
   "name": "superbash",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "toolset の command だけを MCP の道具として出す",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/agent-hand/superbash.git" },
   "bin": { "superbash": "bin/superbash.js" },
   "files": ["bin/superbash.js"],
   "optionalDependencies": {
-    "superbash-darwin-arm64": "0.1.1",
-    "superbash-darwin-x64": "0.1.1",
-    "superbash-linux-arm64": "0.1.1",
-    "superbash-linux-x64": "0.1.1"
+    "superbash-darwin-arm64": "0.1.2",
+    "superbash-darwin-x64": "0.1.2",
+    "superbash-linux-arm64": "0.1.2",
+    "superbash-linux-x64": "0.1.2"
   }
 }

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  superbash を常駐させる launchd の user agent の雛形（root 不使用）。
+  <...> の placeholder を書き換えて ~/Library/LaunchAgents/ に置く。使い方は README の「常駐」。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.example.superbash</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/node/bin/npx</string>
+    <string>-y</string>
+    <string>superbash@0.1.2</string>
+    <string>@scope/toolset@1.0.0</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>7391</string>
+  </array>
+
+  <!-- server の起動 dir。command の作業 dir はここになる（省略すると /）。 -->
+  <key>WorkingDirectory</key>
+  <string>/path/to/workdir</string>
+
+  <!-- npx は node を PATH から探す。node の bin の dir を含める。 -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/path/to/node/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/path/to/logs/superbash.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/logs/superbash.err.log</string>
+</dict>
+</plist>

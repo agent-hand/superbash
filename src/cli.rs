@@ -4,6 +4,9 @@ use clap::Parser;
 
 use crate::config::Command;
 
+pub const DEFAULT_HOST: &str = "127.0.0.1";
+pub const DEFAULT_PORT: u16 = 7391;
+
 #[derive(Parser, Debug)]
 #[command(name = "superbash", version, about)]
 pub struct Cli {
@@ -14,6 +17,14 @@ pub struct Cli {
     /// 実行できる command（指定無し=全部、'a,b'=その command だけ、''=無し）
     #[arg(long, value_name = "CMDS")]
     pub allow_cmd: Option<String>,
+
+    /// MCP の mode で待ち受ける host（既定 127.0.0.1）
+    #[arg(long, default_value = DEFAULT_HOST)]
+    pub host: String,
+
+    /// MCP の mode で待ち受ける port（既定 7391。0 なら空き port）
+    #[arg(long, default_value_t = DEFAULT_PORT)]
+    pub port: u16,
 
     /// toolset（npm に渡して取る。repo か registry の package か）
     pub toolset: String,
@@ -99,6 +110,13 @@ mod tests {
         assert_eq!(c.mode(), Mode::Mcp);
         assert_eq!(c.allow(), AllowCmd::All);
         assert_eq!(c.toolset, "@example/tools@1.2.0");
+        assert_eq!((c.host.as_str(), c.port), ("127.0.0.1", 7391));
+    }
+
+    #[test]
+    fn host_and_port_options() {
+        let c = parse(&["--host", "::1", "--port", "0", "t"]);
+        assert_eq!((c.host.as_str(), c.port), ("::1", 0));
     }
 
     #[test]

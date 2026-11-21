@@ -116,18 +116,11 @@ async fn claude_code_calls_superbash_command() {
         return;
     };
     let sb = Sandbox::new("e2e-claude");
-    let env: serde_json::Map<String, Value> = sb
-        .env()
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), json!(v)))
-        .chain([("PATH".to_string(), json!(std::env::var("PATH").unwrap()))])
-        .collect();
+    let server = start_server(&sb, demo(), None).await;
     let config = sb.root.join("mcp.json");
     let body = json!({"mcpServers": {"superbash": {
-        "type": "stdio",
-        "command": env!("CARGO_BIN_EXE_superbash"),
-        "args": [demo()],
-        "env": env,
+        "type": "http",
+        "url": server.url(),
     }}});
     std::fs::write(&config, serde_json::to_string_pretty(&body).unwrap()).unwrap();
 
@@ -155,6 +148,7 @@ async fn claude_code_calls_superbash_command() {
         .await
         .expect("claude が 240 秒で終わらない")
         .expect("claude を起動できない");
+    server.stop().await;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let events: Vec<Value> = stdout

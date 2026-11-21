@@ -1,11 +1,12 @@
-// npm pack した tarball から npx で superbash を起動し、MCP の initialize・tools/list・tools/call を通す。
+// npm pack した tarball から npx で superbash を起動し、MCP（Streamable HTTP）の initialize・tools/list・tools/call を通す。
 // 使い方: node scripts/npx-smoke.mjs <build した superbash の path> <作業 dir（無ければ作る）>
 // npm の cache・prefix・userconfig は作業 dir の中。registry には繋がない（本体の optionalDependencies は
 // この platform の tarball の file: に書き換えた写しで確かめる）。
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mcpHttpSmoke } from "./mcp-http-client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const [binArg, workArg] = process.argv.slice(2);
@@ -74,62 +75,17 @@ writeFileSync(join(mainDir, "package.json"), JSON.stringify(mp, null, 2));
 const mainTgz = pack(mainDir);
 console.log(`packed: ${mainTgz}\npacked: ${platTgz}`);
 
-// 4. npx で起動して MCP を通す
+// 4. npx で起動して MCP（Streamable HTTP）を通す
 const toolset = join(root, "tests/fixtures/demo-tools");
-const child = spawn(
-  "npx",
-  ["--yes", `--package=${mainTgz}`, "--", "superbash", toolset],
-  { cwd: work, env, stdio: ["pipe", "pipe", "inherit"] },
-);
-const pending = new Map();
-let buf = "";
-child.stdout.on("data", (d) => {
-  buf += d;
-  let i;
-  while ((i = buf.indexOf("\n")) >= 0) {
-    const line = buf.slice(0, i).trim();
-    buf = buf.slice(i + 1);
-    if (!line) continue;
-    const msg = JSON.parse(line);
-    pending.get(msg.id)?.(msg);
-  }
-});
-let nextId = 1;
-const send = (o) => child.stdin.write(JSON.stringify(o) + "\n");
-const request = (method, params) =>
-  new Promise((res, rej) => {
-    const id = nextId++;
-    const t = setTimeout(() => rej(new Error(`timeout: ${method}`)), 240_000);
-    pending.set(id, (m) => {
-      clearTimeout(t);
-      res(m);
-    });
-    send({ jsonrpc: "2.0", id, method, params });
-  });
-
 try {
-  const init = await request("initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "npx-smoke", version: "0" },
+  await mcpHttpSmoke({
+    cmd: "npx",
+    args: ["--yes", `--package=${mainTgz}`, "--", "superbash", toolset],
+    env,
+    cwd: work,
+    label: "npx-smoke",
+    clientName: "npx-smoke",
   });
-  if (init.result?.serverInfo?.name !== "superbash") fail(`initialize: ${JSON.stringify(init)}`);
-  send({ jsonrpc: "2.0", method: "notifications/initialized" });
-
-  const list = await request("tools/list", {});
-  const tools = list.result?.tools ?? [];
-  if (tools.length !== 1 || tools[0].name !== "superbash-command") fail(`tools/list: ${JSON.stringify(list)}`);
-
-  const call = await request("tools/call", {
-    name: "superbash-command",
-    arguments: { name: "hello", args: { who: "world" } },
-  });
-  const text = (call.result?.content ?? []).map((c) => c.text ?? "").join("\n");
-  if (call.result?.isError || !text.includes("hello world")) fail(`tools/call: ${JSON.stringify(call)}`);
-  console.log("OK: initialize / tools/list / tools/call");
 } catch (e) {
   fail(String(e));
-} finally {
-  child.stdin.end();
-  child.kill();
 }

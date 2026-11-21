@@ -9,11 +9,12 @@
 //
 // 試験 1: @scope 付きと無しの toolset を publish し、superbash に名前で渡して取得・list・call が通る。
 // 試験 2: 本体 package と、この OS・CPU の platform package を publish し、`npx -y superbash@<版> <toolset>` で
-//         MCP の server が起動し initialize・tools/list・tools/call が通る。
+//         MCP（Streamable HTTP）の server が起動し initialize・tools/list・tools/call が通る。
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mcpHttpSmoke } from "./mcp-http-client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const [binArg, workArg, vdArg] = process.argv.slice(2);
@@ -93,61 +94,9 @@ const publish = (dir) => {
   sh("npm", ["publish", dir, "--registry", REGISTRY, "--access", "public"]);
 };
 
-// MCP の stdio の client
-async function mcp(cmd, args, label) {
-  const child = spawn(cmd, args, { cwd: work, env, stdio: ["pipe", "pipe", "inherit"] });
-  const pending = new Map();
-  let buf = "";
-  child.stdout.on("data", (d) => {
-    buf += d;
-    let i;
-    while ((i = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, i).trim();
-      buf = buf.slice(i + 1);
-      if (!line) continue;
-      const msg = JSON.parse(line);
-      pending.get(msg.id)?.(msg);
-    }
-  });
-  let nextId = 1;
-  const send = (o) => child.stdin.write(JSON.stringify(o) + "\n");
-  const request = (method, params) =>
-    new Promise((res, rej) => {
-      const id = nextId++;
-      const t = setTimeout(() => rej(new Error(`${label}: timeout: ${method}`)), 240_000);
-      pending.set(id, (m) => {
-        clearTimeout(t);
-        res(m);
-      });
-      send({ jsonrpc: "2.0", id, method, params });
-    });
-  try {
-    const init = await request("initialize", {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "registry-e2e", version: "0" },
-    });
-    if (init.result?.serverInfo?.name !== "superbash") fail(`${label}: initialize: ${JSON.stringify(init)}`);
-    send({ jsonrpc: "2.0", method: "notifications/initialized" });
-
-    const list = await request("tools/list", {});
-    const tools = list.result?.tools ?? [];
-    if (tools.length !== 1 || tools[0].name !== "superbash-command") fail(`${label}: tools/list: ${JSON.stringify(list)}`);
-    if (!String(tools[0].description).includes("name: hello")) fail(`${label}: command hello が説明に無い: ${tools[0].description}`);
-
-    const who = `world-${label.replace(/[^a-z0-9]/gi, "")}`;
-    const call = await request("tools/call", {
-      name: "superbash-command",
-      arguments: { name: "hello", args: { who } },
-    });
-    const text = (call.result?.content ?? []).map((c) => c.text ?? "").join("\n");
-    if (call.result?.isError || !text.includes(`hello ${who}`)) fail(`${label}: tools/call: ${JSON.stringify(call)}`);
-    console.log(`OK: ${label}: initialize / tools/list / tools/call`);
-  } finally {
-    child.stdin.end();
-    child.kill();
-  }
-}
+// MCP（Streamable HTTP）の client。superbash を空き port で起動し、address は起動の 1 行から読む
+const mcp = (cmd, args, label) =>
+  mcpHttpSmoke({ cmd, args, env, cwd: work, label, clientName: "registry-e2e" }).catch((e) => fail(String(e)));
 
 try {
   if (!["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"].includes(key)) fail(`対象外: ${key}`);

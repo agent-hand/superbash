@@ -46,9 +46,14 @@ superbash [option...] <toolset>
 
 | mode | 書き方 | 動作 |
 |---|---|---|
-| MCP（既定） | `superbash <toolset> [--allow-cmd …]` | MCP の server（stdio）として動き、道具 `superbash-command` を出す |
+| MCP（既定） | `superbash <toolset> [--allow-cmd …] [--host <host>] [--port <port>]` | Streamable HTTP の MCP server として待ち受け（既定 `127.0.0.1:7391`、endpoint は `/mcp`）、道具 `superbash-command` を出す |
 | install | `superbash --only-install <toolset> [--allow-cmd …]` | 生成した package を superbash の置き場に置き、`npm link` で入れる（command を名前で打てるように）。MCP は起動しない |
 
+- MCP の mode の待ち受け（利用者の決定: stdio の口は持たず、Streamable HTTP にする）:
+  - `--host`（既定 `127.0.0.1`）・`--port`（既定 `7391`。`0` なら空き port）で待ち受ける。endpoint の path は `/mcp`。
+  - 起動したら、待ち受けの address を 1 行（stdout）に出す: `superbash: listening on http://<host>:<port>/mcp`。
+  - MCP の仕様（Streamable HTTP）が localhost の server に求める DNS rebinding の対策として、Host は loopback だけ、Origin は loopback の物だけを通す（Origin が無い非 browser の client は通る）。仕様に無い認証は足さない。
+  - 既定の port 7391 は、Linux・mac の一時 port の範囲（32768 以上）の外で、よく使われる開発用の port（3000・5173・8000・8080・8888・9229 など）とぶつからない番号として選んだ。
 - `--allow-cmd`（MCP の mode と install の mode の両方。install の mode では「入れる command」になる）:
 
 | 指定 | 実行できる command |
@@ -61,7 +66,7 @@ superbash [option...] <toolset>
 
 ```
 MCP client（Claude Code の session）
-   │ stdio（JSON-RPC）
+   │ Streamable HTTP（JSON-RPC、POST /mcp）
    ▼
 superbash <toolset> [--allow-cmd …]
    1. toolset の取得: <toolset> を npm に渡して取らせる（repo か package かの見分けも npm に任せる）
@@ -345,19 +350,20 @@ registry（verdaccio など）はこの Mac に無く、registry から取る形
 
 bantou では、普通の MCP の設定として書く。center の上の session は center の共通の設定に、server の worker は各 server の config に書く。鍵は要らない。
 
-例（MCP の設定の 1 件）:
+例（MCP の設定の 1 件。server は常駐させて、client は url で繋ぐ。利用者の決定: stdio ではなく Streamable HTTP）:
 
 ```json
 {
   "mcpServers": {
     "superbash": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "superbash@<版>", "@example/tools@1.2.0", "--allow-cmd", "lint,test"]
+      "type": "http",
+      "url": "http://127.0.0.1:7391/mcp"
     }
   }
 }
 ```
+
+server は `superbash @example/tools@1.2.0 --allow-cmd lint,test` を常駐させて起動する（mac は launchd の user agent。雛形は `contrib/launchd/`）。
 
 mac の署名ビルドは、後の段で、toolset の command の 1 つとして載せる（ビルド窓口の CLI を `tools/<name>/` に置く）。
 
