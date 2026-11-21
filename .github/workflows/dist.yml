@@ -28,6 +28,12 @@ jobs:
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - name: build
         run: cargo build --release --locked
+      - name: build した実行 file を artifact に上げる（npm-packages job が集める）
+        uses: actions/upload-artifact@v4
+        with:
+          name: superbash-${{ matrix.key }}
+          path: target/release/superbash
+          if-no-files-found: error
       - name: npm pack した tarball から npx で起動して MCP を通す
         run: node scripts/npx-smoke.mjs target/release/superbash "$RUNNER_TEMP/smoke"
       - name: 配布物の中身の確かめ（組み立てと npm pack --dry-run だけ。registry に出さない・token 無し）
@@ -45,6 +51,40 @@ jobs:
           if [ -f "$RUNNER_TEMP/registry-e2e/verdaccio.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/registry-e2e/verdaccio.pid")" 2>/dev/null || true
           fi
+
+  npm-packages:
+    name: npm-packages
+    needs: npx-smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: superbash-*
+          path: ${{ runner.temp }}/bin
+      - name: 5 つの package を組み立てて中身を確かめ、tarball にする（publish はしない・token 無し）
+        run: |
+          D="$RUNNER_TEMP/bin"
+          node scripts/stage-npm.mjs "$RUNNER_TEMP/stage" \
+            darwin-arm64="$D/superbash-darwin-arm64/superbash" \
+            darwin-x64="$D/superbash-darwin-x64/superbash" \
+            linux-arm64="$D/superbash-linux-arm64/superbash" \
+            linux-x64="$D/superbash-linux-x64/superbash"
+          node scripts/pack-check.mjs "$RUNNER_TEMP/stage"
+          mkdir -p "$RUNNER_TEMP/tarballs"
+          for p in superbash superbash-darwin-arm64 superbash-darwin-x64 superbash-linux-arm64 superbash-linux-x64; do
+            npm pack "$RUNNER_TEMP/stage/$p" --pack-destination "$RUNNER_TEMP/tarballs"
+          done
+          ls -l "$RUNNER_TEMP/tarballs"
+          test "$(ls "$RUNNER_TEMP/tarballs" | wc -l)" = 5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/tarballs/*.tgz
+          if-no-files-found: error
 
   cargo:
     name: cargo
