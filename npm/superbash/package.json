@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "description": "toolset の command だけを MCP の道具として出す",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/unagents/superbash.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/agent-hand/superbash.git" },
   "bin": { "superbash": "bin/superbash.js" },
   "files": ["bin/superbash.js"],
   "optionalDependencies": {

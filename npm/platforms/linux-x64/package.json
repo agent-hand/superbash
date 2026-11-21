@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "description": "superbash の linux x64 用の実行 file",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/unagents/superbash.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/agent-hand/superbash.git" },
   "os": ["linux"],
   "cpu": ["x64"],
   "files": ["bin/superbash"]
