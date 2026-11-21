@@ -25,7 +25,16 @@ pub struct PackResult {
 
 impl Npm {
     fn command(&self) -> Command {
-        let mut c = Command::new("npm");
+        self.program("npm")
+    }
+
+    /// npx（MCP の mode が command を実行する時に使う）。環境の扱いは npm と同じ。
+    pub fn npx(&self) -> Command {
+        self.program("npx")
+    }
+
+    fn program(&self, name: &str) -> Command {
+        let mut c = Command::new(name);
         if self.clear_env {
             c.env_clear();
             if let Some(path) = std::env::var_os("PATH") {
@@ -57,6 +66,24 @@ impl Npm {
             bail!("npm config get cache の出力が空");
         }
         Ok(PathBuf::from(s))
+    }
+
+    /// `npm link`（cwd = package の dir）。global の prefix に bin と dir への link ができる。
+    pub fn link(&self, package_dir: &Path) -> Result<()> {
+        let out = self
+            .command()
+            .current_dir(package_dir)
+            .arg("link")
+            .output()
+            .context("npm を起動できない")?;
+        if !out.status.success() {
+            bail!(
+                "npm link が失敗 ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(())
     }
 
     /// `npm pack <spec> --json --pack-destination <dest>`（cwd = cwd）。

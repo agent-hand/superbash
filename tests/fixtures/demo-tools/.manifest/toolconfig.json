@@ -1,0 +1,43 @@
+{
+  "name": "demo-tools",
+  "description": "MCP の test 用の toolset",
+  "owner": { "name": "example" },
+  "tools": {
+    "demo-cli": { "entry": "main.js" }
+  },
+  "commands": [
+    {
+      "name": "hello",
+      "description": "挨拶を出す。",
+      "tool": "demo-cli",
+      "spec": {
+        "subcommand": "hello",
+        "usage": "demo-cli hello <who>",
+        "in": {
+          "positionals": [{ "name": "who", "type": "string", "description": "相手" }]
+        },
+        "out": { "stdout": { "format": "text", "description": "hello <who>" } }
+      }
+    },
+    {
+      "name": "fail",
+      "description": "stderr に出して終了 code 3 で終わる。",
+      "tool": "demo-cli",
+      "spec": { "subcommand": "fail", "usage": "demo-cli fail" }
+    },
+    {
+      "name": "nap",
+      "description": "started を出し、ms 後に finished を出す。",
+      "tool": "demo-cli",
+      "spec": {
+        "subcommand": "nap",
+        "usage": "demo-cli nap --ms <n>",
+        "in": {
+          "options": {
+            "ms": { "flag": "--ms", "type": "number", "description": "待つ時間（ミリ秒）" }
+          }
+        }
+      }
+    }
+  ]
+}

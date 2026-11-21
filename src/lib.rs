@@ -4,5 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod fetch;
 pub mod generate;
+pub mod install;
+pub mod mcp;
 pub mod modes;
 pub mod npm;

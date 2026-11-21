@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use crate::cli::AllowCmd;
 use crate::config::ToolConfig;
@@ -48,20 +48,37 @@ pub fn prepare(
     result
 }
 
-/// MCP の mode（既定）。server 本体は次のまとまり。
+/// MCP の mode（既定）。stdio で MCP server として動く。
 pub fn mcp(npm: &Npm, toolset: &str, allow: &AllowCmd) -> Result<()> {
+    use rmcp::ServiceExt;
+
+    use crate::mcp::exec::Runner;
+    use crate::mcp::server::SuperbashServer;
+
     let generated = prepare(npm, toolset, allow, true)?;
-    bail!(
-        "MCP server は未実装（次のまとまり）。生成した tarball: {}",
-        generated.tarball.display()
-    )
+    let config = ToolConfig::load(&generated.package_dir)?;
+    let commands: Vec<_> = allow
+        .select(&config.commands)
+        .into_iter()
+        .cloned()
+        .collect();
+    let runs_dir = npm.cache_dir()?.join("_superbash").join("runs");
+    let runner = Runner::new(npm.clone(), generated.tarball, runs_dir);
+    let server = SuperbashServer::new(commands, runner);
+
+    let rt = tokio::runtime::Runtime::new().context("tokio を起動できない")?;
+    rt.block_on(async {
+        let running = server
+            .serve(rmcp::transport::stdio())
+            .await
+            .context("MCP server を起動できない")?;
+        running.waiting().await.context("MCP server が異常終了")?;
+        Ok(())
+    })
 }
 
-/// `--only-install`。npm link は次のまとまり。
+/// `--only-install`（wrapper 無しで生成し、置き場の dir で npm link する）。
 pub fn install(npm: &Npm, toolset: &str, allow: &AllowCmd) -> Result<()> {
     let generated = prepare(npm, toolset, allow, false)?;
-    bail!(
-        "npm link は未実装（次のまとまり）。生成した package: {}",
-        generated.package_dir.display()
-    )
+    crate::install::link(npm, &generated)
 }

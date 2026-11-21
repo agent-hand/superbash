@@ -50,9 +50,55 @@ pub struct Spec {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SpecIn {
     #[serde(default)]
-    pub options: BTreeMap<String, OptionDef>,
+    pub options: OrderedMap<OptionDef>,
     #[serde(default)]
     pub positionals: Vec<PositionalDef>,
+}
+
+/// JSON の object を、書いた順のまま持つ map（BTreeMap は辞書順になる）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderedMap<T>(pub Vec<(String, T)>);
+
+impl<T> Default for OrderedMap<T> {
+    fn default() -> Self {
+        OrderedMap(Vec::new())
+    }
+}
+
+impl<T> OrderedMap<T> {
+    /// 定義の順に (key, 値) を返す。
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &T)> {
+        self.0.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for OrderedMap<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V<T>(std::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for V<T> {
+            type Value = OrderedMap<T>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut m: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut v = Vec::new();
+                while let Some(kv) = m.next_entry::<String, T>()? {
+                    v.push(kv);
+                }
+                Ok(OrderedMap(v))
+            }
+        }
+        d.deserialize_map(V(std::marker::PhantomData))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,6 +170,26 @@ mod tests {
     fn minimal_config_loads() {
         let c = parse(OK).unwrap();
         assert!(c.commands[0].spec.input.positionals.is_empty());
+    }
+
+    #[test]
+    fn options_keep_definition_order() {
+        let json = OK.replace(
+            r#""spec":{"subcommand":"s"}"#,
+            r#""spec":{"in":{"options":{
+              "zeta":{"flag":"--zeta","type":"boolean"},
+              "alpha":{"flag":"--alpha","type":"string"},
+              "mid":{"flag":"--mid","type":"number"}}}}"#,
+        );
+        let c = parse(&json).unwrap();
+        let keys: Vec<&str> = c.commands[0]
+            .spec
+            .input
+            .options
+            .iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(keys, ["zeta", "alpha", "mid"]);
     }
 
     #[test]
