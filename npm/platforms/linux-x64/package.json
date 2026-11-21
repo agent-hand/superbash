@@ -2,7 +2,7 @@
   "name": "superbash-linux-x64",
   "version": "0.1.0",
   "description": "superbash の linux x64 用の実行 file",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/unagents/superbash.git" },
   "os": ["linux"],
   "cpu": ["x64"],

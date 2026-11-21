@@ -1,6 +1,7 @@
 //! 実際の入口からの確認: repo の名前（手元の bare repo）で渡す事と、Claude Code から道具を呼ぶ事。
 //!
-//! registry（verdaccio）からの取得の test は、publish の扱いが決まるまで置かない。
+//! registry（使い捨ての verdaccio）からの取得の test は、tests ではなく scripts/registry-e2e.mjs
+//! （dist workflow の runner の中）で行う。ここには置かない。
 
 mod common;
 
@@ -106,6 +107,18 @@ async fn claude_code_calls_superbash_command() {
         .expect("claude が 240 秒で終わらない")
         .expect("claude を起動できない");
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // claude はあるが未ログインの環境では、その事を出して skip する。それ以外の失敗は fail のまま。
+    if stdout.contains("Not logged in")
+        || stdout.contains("authentication_failed")
+        || stderr.contains("Not logged in")
+        || stderr.contains("authentication_failed")
+    {
+        eprintln!(
+            "SKIP: claude が未ログイン（Not logged in / authentication_failed）なので、Claude Code の test を skip する"
+        );
+        return;
+    }
     let events: Vec<Value> = stdout
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
@@ -128,6 +141,6 @@ async fn claude_code_calls_superbash_command() {
     assert!(
         called && returned,
         "called={called} returned={returned}\nstdout:\n{stdout}\nstderr:\n{}",
-        String::from_utf8_lossy(&out.stderr)
+        stderr
     );
 }

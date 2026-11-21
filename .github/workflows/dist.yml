@@ -30,8 +30,13 @@ jobs:
         run: cargo build --release --locked
       - name: npm pack した tarball から npx で起動して MCP を通す
         run: node scripts/npx-smoke.mjs target/release/superbash "$RUNNER_TEMP/smoke"
+      - name: 配布物の中身の確かめ（組み立てと npm pack --dry-run だけ。registry に出さない・token 無し）
+        run: |
+          B="$PWD/target/release/superbash"
+          node scripts/stage-npm.mjs "$RUNNER_TEMP/stage" darwin-arm64="$B" darwin-x64="$B" linux-arm64="$B" linux-x64="$B"
+          node scripts/pack-check.mjs "$RUNNER_TEMP/stage"
       - name: verdaccio を入れる（使い捨ての registry 用。入れるだけで publish はしない）
-        run: npm install --prefix "$RUNNER_TEMP/verdaccio-tool" verdaccio@6 --no-audit --no-fund
+        run: npm install --prefix "$RUNNER_TEMP/verdaccio-tool" verdaccio@6.11.3 --no-audit --no-fund
       - name: 使い捨ての registry（127.0.0.1 の verdaccio）で toolset と本体 package の試験
         run: node scripts/registry-e2e.mjs target/release/superbash "$RUNNER_TEMP/registry-e2e" "$RUNNER_TEMP/verdaccio-tool/node_modules/verdaccio/bin/verdaccio"
       - name: verdaccio を止める
@@ -40,3 +45,22 @@ jobs:
           if [ -f "$RUNNER_TEMP/registry-e2e/verdaccio.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/registry-e2e/verdaccio.pid")" 2>/dev/null || true
           fi
+
+  cargo:
+    name: cargo
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy && rustup default stable
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: test（runner に claude は無いので、Claude Code の test は skip になる）
+        shell: bash
+        run: cargo test -- --nocapture 2>&1 | tee "$RUNNER_TEMP/cargo-test.log"
+      - name: Claude Code の test が skip になった事を確かめる
+        run: |
+          if command -v claude >/dev/null 2>&1; then echo "claude が runner にある"; exit 1; fi
+          grep -q "SKIP: claude が PATH にも" "$RUNNER_TEMP/cargo-test.log"

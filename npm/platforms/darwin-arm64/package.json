@@ -2,7 +2,7 @@
   "name": "superbash-darwin-arm64",
   "version": "0.1.0",
   "description": "superbash の darwin arm64 用の実行 file",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/unagents/superbash.git" },
   "os": ["darwin"],
   "cpu": ["arm64"],
