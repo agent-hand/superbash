@@ -7,9 +7,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::cli::AllowCmd;
 use crate::config::{TOOLCONFIG_PATH, ToolConfig};
@@ -59,20 +62,100 @@ pub fn generate(npm: &Npm, input: &GenerateInput) -> Result<Generated> {
         bins.insert(WRAPPER_BIN.into(), WRAPPER_PATH.into());
     }
 
-    let key = key_dir_name(
-        input,
-        &selected.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-    );
-    let key_dir = input.root.join(key);
-    if key_dir.exists() {
-        fs::remove_dir_all(&key_dir)
-            .with_context(|| format!("{} を作り直せない", key_dir.display()))?;
-    }
-    let pkg = key_dir.join("package");
-    fs::create_dir_all(&pkg)?;
+    // 組み立てと npm pack は、他と衝突しない名前の作業 dir（root 直下の .stage-*）の中で終わらせる。
+    // key の dir には、tarball まで出来上がった物だけを rename（不可分）で置く。
+    let stage = unique_stage_dir(input.root);
+    let pkg = stage.join("package");
+    let made = (|| -> Result<(String, Option<PathBuf>)> {
+        fs::create_dir_all(&pkg)?;
+        build_package(input, &selected, &bins, &pkg)?;
+        let hash = hash_dir(&pkg)?;
+        let key_dir = input.root.join(key_dir_name(input, &hash));
+        if key_dir.is_dir() {
+            // 他の process（または前回）が先に置いた物がある。pack せずそれを使う。
+            return Ok((hash, None));
+        }
+        let packed = npm.pack(".".as_ref(), &pkg, &stage)?;
+        let tarball = stage.join(&packed.filename);
+        if !tarball.is_file() {
+            bail!("npm pack の tarball が無い: {}", tarball.display());
+        }
+        Ok((hash, Some(PathBuf::from(packed.filename))))
+    })();
+    let (hash, packed_name) = match made {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&stage);
+            return Err(e);
+        }
+    };
 
+    let key_dir = input.root.join(key_dir_name(input, &hash));
+    if let Some(name) = packed_name {
+        // 置き先が既にある空でない dir なら rename は失敗する。その時は先に置いた物を使う。
+        match fs::rename(&stage, &key_dir) {
+            Ok(()) => return Ok(placed(&key_dir, &name, bins)),
+            Err(e) => {
+                let _ = fs::remove_dir_all(&stage);
+                if !key_dir.is_dir() {
+                    return Err(e).with_context(|| format!("{} に置けない", key_dir.display()));
+                }
+            }
+        }
+    } else {
+        let _ = fs::remove_dir_all(&stage);
+    }
+    // 先に置かれていた key の dir を使う（中身は消さない・作り直さない）。
+    let tarball = find_tarball(&key_dir)
+        .with_context(|| format!("{} に tarball が無い", key_dir.display()))?;
+    Ok(Generated {
+        package_dir: key_dir.join("package"),
+        tarball,
+        bins,
+    })
+}
+
+fn placed(key_dir: &Path, tarball_name: &Path, bins: BTreeMap<String, String>) -> Generated {
+    Generated {
+        package_dir: key_dir.join("package"),
+        tarball: key_dir.join(tarball_name),
+        bins,
+    }
+}
+
+/// 衝突しない作業 dir の名前（pid・時刻・process 内の連番）。dir 自体はまだ作らない。
+fn unique_stage_dir(root: &Path) -> PathBuf {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    root.join(format!(
+        ".stage-{}-{nanos}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// key_dir にある tarball（npm pack の結果）。key の dir は完成した物しか置かれないので、あれば完全。
+fn find_tarball(key_dir: &Path) -> Option<PathBuf> {
+    let rd = fs::read_dir(key_dir).ok()?;
+    let mut found: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "tgz"))
+        .collect();
+    found.sort();
+    found.into_iter().next()
+}
+
+/// 生成する package の中身を pkg に組む。
+fn build_package(
+    input: &GenerateInput,
+    selected: &[&crate::config::Command],
+    bins: &BTreeMap<String, String>,
+    pkg: &Path,
+) -> Result<()> {
     // tools/<name>/
-    for tool in bins_tools(&selected) {
+    for tool in bins_tools(selected) {
         let src = input.toolset_dir.join("tools").join(&tool);
         if !src.is_dir() {
             bail!("toolset に tools/{tool}/ が無い");
@@ -107,17 +190,50 @@ pub fn generate(npm: &Npm, input: &GenerateInput) -> Result<Generated> {
         pkg.join("package.json"),
         serde_json::to_string_pretty(&pkg_json)? + "\n",
     )?;
+    Ok(())
+}
 
-    let packed = npm.pack(".".as_ref(), &pkg, &key_dir)?;
-    let tarball = key_dir.join(&packed.filename);
-    if !tarball.is_file() {
-        bail!("npm pack の tarball が無い: {}", tarball.display());
+/// package の dir の中身の hash（sha256 の hex）。
+/// 入れる物: 各 entry の相対 path（名前順）・種別・実行の権限・file の中身・symlink の向き先、
+/// と superbash 自身の版。package.json（名前・版・bin・dependencies）・tools の code・
+/// toolconfig・wrapper（MCP の mode だけ）は dir の中身なので、--allow-cmd と mode の違いも中身に出る。
+fn hash_dir(root: &Path) -> Result<String> {
+    let mut h = Sha256::new();
+    h.update(b"superbash\0");
+    h.update(env!("CARGO_PKG_VERSION").as_bytes());
+    h.update(b"\0");
+    hash_walk(root, Path::new(""), &mut h)?;
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn hash_walk(base: &Path, rel: &Path, h: &mut Sha256) -> Result<()> {
+    let mut names: Vec<_> = fs::read_dir(base.join(rel))?
+        .map(|e| e.map(|e| e.file_name()))
+        .collect::<std::io::Result<_>>()?;
+    names.sort();
+    for name in names {
+        let rel = rel.join(&name);
+        let full = base.join(&rel);
+        let meta = fs::symlink_metadata(&full)?;
+        let ty = meta.file_type();
+        h.update(rel.to_string_lossy().as_bytes());
+        h.update(b"\0");
+        if ty.is_symlink() {
+            h.update(b"l\0");
+            h.update(fs::read_link(&full)?.to_string_lossy().as_bytes());
+            h.update(b"\0");
+        } else if ty.is_dir() {
+            h.update(b"d\0");
+            hash_walk(base, &rel, h)?;
+        } else {
+            let exec = meta.permissions().mode() & 0o111 != 0;
+            let body = fs::read(&full)?;
+            h.update(if exec { b"x\0" } else { b"f\0" });
+            h.update((body.len() as u64).to_le_bytes());
+            h.update(&body);
+        }
     }
-    Ok(Generated {
-        package_dir: pkg,
-        tarball,
-        bins,
-    })
+    Ok(())
 }
 
 fn bins_tools(selected: &[&crate::config::Command]) -> Vec<String> {
@@ -138,16 +254,10 @@ fn toolset_dependencies(toolset_dir: &Path) -> Result<Option<Value>> {
         .filter(|d| d.as_object().is_some_and(|o| !o.is_empty())))
 }
 
-/// 置き場の下の dir 名。同じ toolset でも mode と command の範囲が違えば別の dir にする。
-fn key_dir_name(input: &GenerateInput, selected: &[&str]) -> String {
+/// 置き場の下の dir 名: `<name>-<version>-<mode>-<中身の hash の先頭 16 桁>`。
+/// 中身が変われば dir 名（= tarball の path）が変わり、npx の cache の古い写しを使わない。
+fn key_dir_name(input: &GenerateInput, hash: &str) -> String {
     let mode = if input.with_wrapper { "mcp" } else { "install" };
-    let mut h: u64 = 0xcbf29ce484222325; // FNV-1a
-    for part in std::iter::once(mode).chain(selected.iter().copied()) {
-        for b in part.bytes().chain(std::iter::once(0)) {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x100000001b3);
-        }
-    }
     let sanitized: String = format!("{}-{}", input.name, input.version)
         .chars()
         .map(|c| {
@@ -158,7 +268,7 @@ fn key_dir_name(input: &GenerateInput, selected: &[&str]) -> String {
             }
         })
         .collect();
-    format!("{sanitized}-{mode}-{:08x}", h as u32)
+    format!("{sanitized}-{mode}-{}", &hash[..16])
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
