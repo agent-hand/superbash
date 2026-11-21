@@ -150,7 +150,16 @@ async fn background_returns_id_and_readable_output() {
     let out = PathBuf::from(sc["output_path"].as_str().unwrap());
     let status = PathBuf::from(sc["status_path"].as_str().unwrap());
     assert!(id.starts_with("bg-"));
-    assert!(out.starts_with(sb.cache()), "{}", out.display());
+    // CARGO_TARGET_DIR が未正規化・相対でも比べられるよう、両方を正規化する。
+    // output file はまだ無い事があるので、親 dir を正規化して file 名を足す。
+    let out_norm = out
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .join(out.file_name().unwrap());
+    let cache_norm = sb.cache().canonicalize().unwrap();
+    assert!(out_norm.starts_with(&cache_norm), "{}", out.display());
 
     // 状態が running でなくなるのを観測して待つ
     wait_until("background の終了", Duration::from_secs(60), || {
