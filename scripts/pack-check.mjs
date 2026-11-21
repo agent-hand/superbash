@@ -1,7 +1,7 @@
 // stage-npm.mjs で組み立てた 5 つの package を `npm pack --dry-run --json` で確かめる（token 不要・registry に繋がない）。
 // 使い方: node scripts/pack-check.mjs <stage した dir>
 // 各 package に package.json・LICENSE と実行 file（本体は bin/superbash.js、OS・CPU ごとは bin/superbash）が入り、
-// license が MIT で、version が揃っている事を見る。足りなければ fail。
+// license が MIT で LICENSE の本文も MIT License で、version が揃っている事を見る。足りなければ fail。
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -30,6 +30,17 @@ const check = (dir, name, expectBin) => {
   const files = new Map(JSON.parse(r.stdout)[0].files.map((f) => [f.path, f]));
   for (const need of ["package.json", "LICENSE", expectBin]) {
     if (!files.has(need)) fail(`${name}: tarball に ${need} が無い（${[...files.keys()].join(", ")}）`);
+  }
+  // LICENSE の本文が MIT License の本文である事（先頭の行と許諾の文の要点）。
+  const lic = readFileSync(join(dir, "LICENSE"), "utf8");
+  if (lic.split("\n")[0].trim() !== "MIT License") fail(`${name}: LICENSE の先頭の行が "MIT License" でない`);
+  for (const phrase of [
+    "Permission is hereby granted, free of charge, to any person obtaining a copy",
+    "to deal in the Software without restriction",
+    "The above copyright notice and this permission notice shall be included in all",
+    'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND',
+  ]) {
+    if (!lic.replace(/\s+/g, " ").includes(phrase)) fail(`${name}: LICENSE に MIT License の本文（${phrase}）が無い`);
   }
   const b = files.get(expectBin);
   if (b && (b.mode & 0o111) === 0) fail(`${name}: ${expectBin} に実行 bit が無い（mode=${b.mode.toString(8)}）`);

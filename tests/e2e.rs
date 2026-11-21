@@ -55,6 +55,55 @@ fn find_claude() -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// stream-json の system・result の項目が認証失敗を示すか。
+/// 道具の出力（user の tool_result など）や assistant の本文に同じ語があっても、skip にしない。
+fn is_auth_failure(events: &[Value]) -> bool {
+    events.iter().any(|e| match e["type"].as_str() {
+        Some("system") => e["error"] == "authentication_failed",
+        Some("result") => {
+            e["is_error"] == true
+                && (e["error"] == "authentication_failed"
+                    || e["result"]
+                        .as_str()
+                        .is_some_and(|r| r.trim_start().starts_with("Not logged in")))
+        }
+        _ => false,
+    })
+}
+
+#[cfg(test)]
+mod auth_failure_tests {
+    use super::*;
+
+    #[test]
+    fn detects_system_and_result_auth_failure() {
+        let sys =
+            vec![json!({"type":"system","subtype":"api_retry","error":"authentication_failed"})];
+        assert!(is_auth_failure(&sys));
+        let res = vec![
+            json!({"type":"result","is_error":true,"result":"Not logged in · Please run /login"}),
+        ];
+        assert!(is_auth_failure(&res));
+        let res2 = vec![json!({"type":"result","is_error":true,"error":"authentication_failed"})];
+        assert!(is_auth_failure(&res2));
+    }
+
+    #[test]
+    fn tool_output_with_the_same_words_does_not_skip() {
+        let events = vec![
+            json!({"type":"system","subtype":"init"}),
+            json!({"type":"assistant","message":{"content":[{"type":"text","text":"Not logged in authentication_failed"}]}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","content":"Not logged in authentication_failed"}]}}),
+            json!({"type":"result","is_error":false,"result":"hello: Not logged in authentication_failed"}),
+        ];
+        assert!(!is_auth_failure(&events));
+        // 失敗の result でも、認証失敗でなければ skip しない。
+        let other =
+            vec![json!({"type":"result","is_error":true,"result":"tool said Not logged in"})];
+        assert!(!is_auth_failure(&other));
+    }
+}
+
 /// Claude Code（`claude -p`）に MCP の設定（作業 dir 内の file）で superbash を渡し、
 /// superbash-command を呼ばせて、command の出力が返る事を確かめる。
 /// claude が無い環境では、その事を出して skip する。host の claude の設定は変えない。
@@ -108,21 +157,15 @@ async fn claude_code_calls_superbash_command() {
         .expect("claude を起動できない");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    // claude はあるが未ログインの環境では、その事を出して skip する。それ以外の失敗は fail のまま。
-    if stdout.contains("Not logged in")
-        || stdout.contains("authentication_failed")
-        || stderr.contains("Not logged in")
-        || stderr.contains("authentication_failed")
-    {
-        eprintln!(
-            "SKIP: claude が未ログイン（Not logged in / authentication_failed）なので、Claude Code の test を skip する"
-        );
-        return;
-    }
     let events: Vec<Value> = stdout
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect();
+    // claude はあるが未ログインの環境では、その事を出して skip する。それ以外の失敗は fail のまま。
+    if is_auth_failure(&events) {
+        eprintln!("SKIP: claude が未ログイン（認証失敗）なので、Claude Code の test を skip する");
+        return;
+    }
     let blocks = |ty: &str| -> Vec<Value> {
         events
             .iter()
