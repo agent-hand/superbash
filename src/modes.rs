@@ -56,11 +56,7 @@ pub fn mcp(npm: &Npm, toolset: &str, allow: &AllowCmd, host: &str, port: u16) ->
 
     let generated = prepare(npm, toolset, allow, true)?;
     let config = ToolConfig::load(&generated.package_dir)?;
-    let commands: Vec<_> = allow
-        .select(&config.commands)
-        .into_iter()
-        .cloned()
-        .collect();
+    let commands = allow.select(&config.commands);
     let runs_dir = npm.cache_dir()?.join("_superbash").join("runs");
     let runner = Runner::new(npm.clone(), generated.tarball, runs_dir);
     let server = SuperbashServer::new(commands, runner);

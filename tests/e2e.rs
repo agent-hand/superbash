@@ -32,7 +32,7 @@ async fn bare_repo_name_works_through_the_binary() {
     )
     .await;
     assert!(!is_error(&r), "{}", text(&r));
-    assert!(text(&r).contains(r#""--fix","src""#), "{}", text(&r));
+    assert!(text(&r).contains(r#""--fix","--","src""#), "{}", text(&r));
     c.cancel().await.unwrap();
 
     // --allow-cmd も repo の名前で効く

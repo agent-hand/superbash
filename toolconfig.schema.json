@@ -26,28 +26,59 @@
       }
     },
     "command": {
+      "description": "上の要素（commands[] の 1 つ）。subcommands で下の要素を持てる（群）。葉は spec が必須、群は spec を省ける。docs/toolset-convention.md",
       "type": "object",
-      "required": ["name", "tool", "spec"],
+      "required": ["name", "tool"],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": { "description": "空白を含めない。並びの名前の先頭", "type": "string", "minLength": 1, "pattern": "^\\S+$" },
         "description": { "type": "string" },
         "category": { "type": "string" },
         "tool": { "description": "tools の key", "type": "string" },
         "version": { "type": "string" },
-        "spec": { "$ref": "#/definitions/spec" }
+        "spec": { "$ref": "#/definitions/spec" },
+        "subcommands": { "type": "array", "items": { "$ref": "#/definitions/subcommand" } }
+      },
+      "anyOf": [
+        { "required": ["spec"] },
+        { "required": ["subcommands"], "properties": { "subcommands": { "minItems": 1 } } }
+      ]
+    },
+    "subcommand": {
+      "description": "下の要素。command と同じ形（tool・category・version・spec.subcommand は上の要素だけ）。兄弟の name は重ならない",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "description": "空白を含めない。argv の語にもなる", "type": "string", "minLength": 1, "pattern": "^\\S+$" },
+        "description": { "type": "string" },
+        "spec": { "$ref": "#/definitions/subspec" },
+        "subcommands": { "type": "array", "items": { "$ref": "#/definitions/subcommand" } }
+      },
+      "anyOf": [
+        { "required": ["spec"] },
+        { "required": ["subcommands"], "properties": { "subcommands": { "minItems": 1 } } }
+      ]
+    },
+    "subspec": {
+      "description": "下の要素の spec（spec.subcommand は持てない）",
+      "type": "object",
+      "not": { "required": ["subcommand"] },
+      "properties": {
+        "usage": { "type": "string" },
+        "in": { "$ref": "#/definitions/in" },
+        "out": { "$ref": "#/definitions/out" }
       }
     },
     "spec": {
       "type": "object",
       "properties": {
-        "subcommand": { "description": "使う副 command の名前（help は必須で持つ）", "type": "string" },
+        "subcommand": { "description": "bin の直後に付ける語（上の要素だけ。help は予約）", "type": "string" },
         "usage": { "type": "string" },
         "in": { "$ref": "#/definitions/in" },
         "out": { "$ref": "#/definitions/out" }
       }
     },
     "in": {
-      "description": "wrapper は subcommand、options（書いた順）、positionals（書いた順）の順に argv を組む",
+      "description": "wrapper は bin の後に spec.subcommand と下の名前の並び、options（書いた順）、`--`、positionals（書いた順）の順に argv を組む。args は呼ぶ葉の in だけで読む",
       "type": "object",
       "properties": {
         "options": {

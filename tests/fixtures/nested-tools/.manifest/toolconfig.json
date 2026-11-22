@@ -1,0 +1,80 @@
+{
+  "name": "nested-tools",
+  "description": "入れ子（3 段）の test 用の toolset",
+  "owner": { "name": "example" },
+  "tools": {
+    "gh-cli": { "entry": "main.js" }
+  },
+  "commands": [
+    {
+      "name": "github",
+      "description": "github の操作（test 用。何も作らない）",
+      "category": "publish",
+      "tool": "gh-cli",
+      "version": "0.3.0",
+      "spec": { "subcommand": "github" },
+      "subcommands": [
+        {
+          "name": "repo",
+          "description": "repo の操作",
+          "subcommands": [
+            {
+              "name": "create",
+              "description": "repo を作る",
+              "spec": {
+                "usage": "gh-cli github repo create <repo>",
+                "in": {
+                  "positionals": [{ "name": "repo", "type": "string", "description": "owner/name" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "release",
+          "description": "release の操作",
+          "subcommands": [
+            {
+              "name": "create",
+              "description": "release を作る",
+              "spec": {
+                "usage": "gh-cli github release create [--title <title>] [--draft] <repo> <tag>",
+                "in": {
+                  "options": {
+                    "title": { "flag": "--title", "type": "string", "description": "題。省略時は tag" },
+                    "draft": { "flag": "--draft", "type": "boolean", "description": "下書きにする" }
+                  },
+                  "positionals": [
+                    { "name": "repo", "type": "string", "description": "owner/name" },
+                    { "name": "tag", "type": "string", "description": "tag の名前" }
+                  ]
+                },
+                "out": {
+                  "stdout": { "format": "json", "description": "LONG-OUT-DESCRIPTION { ok, url, error? }" },
+                  "exitCodes": { "0": "作った", "1": "失敗", "2": "使い方の誤り" }
+                }
+              }
+            },
+            {
+              "name": "list",
+              "description": "release の一覧",
+              "spec": { "usage": "gh-cli github release list" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plain",
+      "description": "spec.subcommand が無い上の要素の群",
+      "tool": "gh-cli",
+      "subcommands": [
+        {
+          "name": "ls",
+          "description": "一覧",
+          "spec": { "usage": "gh-cli ls" }
+        }
+      ]
+    }
+  ]
+}

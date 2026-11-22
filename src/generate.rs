@@ -52,8 +52,9 @@ pub fn generate(npm: &Npm, input: &GenerateInput) -> Result<Generated> {
     // bin は、実行できる command が使う tool ごとに 1 つ。
     let mut bins: BTreeMap<String, String> = BTreeMap::new();
     for c in &selected {
-        let entry = &input.config.tools[&c.tool].entry;
-        bins.insert(c.tool.clone(), format!("tools/{}/{}", c.tool, entry));
+        let tool = c.tool_name();
+        let entry = &input.config.tools[tool].entry;
+        bins.insert(tool.to_string(), format!("tools/{tool}/{entry}"));
     }
     if input.with_wrapper {
         if bins.contains_key(WRAPPER_BIN) {
@@ -150,7 +151,7 @@ fn find_tarball(key_dir: &Path) -> Option<PathBuf> {
 /// 生成する package の中身を pkg に組む。
 fn build_package(
     input: &GenerateInput,
-    selected: &[&crate::config::Command],
+    selected: &[crate::config::Command],
     bins: &BTreeMap<String, String>,
     pkg: &Path,
 ) -> Result<()> {
@@ -236,8 +237,8 @@ fn hash_walk(base: &Path, rel: &Path, h: &mut Sha256) -> Result<()> {
     Ok(())
 }
 
-fn bins_tools(selected: &[&crate::config::Command]) -> Vec<String> {
-    let mut v: Vec<String> = selected.iter().map(|c| c.tool.clone()).collect();
+fn bins_tools(selected: &[crate::config::Command]) -> Vec<String> {
+    let mut v: Vec<String> = selected.iter().map(|c| c.tool_name().to_string()).collect();
     v.sort();
     v.dedup();
     v

@@ -1,6 +1,6 @@
 {
   "name": "superbash-darwin-x64",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "superbash の darwin x64 用の実行 file",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/agent-hand/superbash.git" },

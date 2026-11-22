@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // superbash の wrapper（MCP の mode 用）。
-// 使い方: superbash-run <command 名> [<args の JSON>]
+// 使い方: superbash-run <command 名（サブコマンドは空白で区切った並び）> [<args の JSON>]
 // toolconfig.json の spec.in の規則で argv の配列を組み、command の bin を shell を通さず起動する。
 
 const { spawn } = require('node:child_process');
@@ -13,9 +13,35 @@ const ROOT = path.resolve(__dirname, '..');
 
 class UsageError extends Error {}
 
-// argv = [subcommand] + options（定義の順。boolean は true の時だけ flag、string/number は flag と値の 2 引数）
-//        + positionals（定義の順。省略できるのは optional のものだけ）
-function buildArgv(command, args) {
+// 並びの名前（空白で区切った並び）で葉を引く。前後の空白は捨て、続いた空白は 1 つの区切り。
+// 戻り値は { top, node, head }。head は argv の頭（上の要素の spec.subcommand と、上の要素より下の名前）。
+// 群は呼べない（子の名前の一覧を誤りで返す）。
+function resolveLeaf(commands, name) {
+  const words = String(name).split(/\s+/).filter((w) => w !== '');
+  const top = words.length > 0 ? commands.find((c) => c.name === words[0]) : undefined;
+  if (!top) throw new UsageError(`command が無い: ${name}`);
+  let node = top;
+  const head = top.spec && top.spec.subcommand ? [top.spec.subcommand] : [];
+  for (const w of words.slice(1)) {
+    const child = (node.subcommands || []).find((c) => c.name === w);
+    if (!child) throw new UsageError(`command が無い: ${words.join(' ')}`);
+    head.push(child.name);
+    node = child;
+  }
+  const subs = node.subcommands || [];
+  if (subs.length > 0) {
+    throw new UsageError(
+      `${words.join(' ')} は子を持つ群で、呼べるのは葉だけ。子を指して: [${subs.map((c) => c.name).join(', ')}]`,
+    );
+  }
+  return { top, node, head };
+}
+
+// argv = head（spec.subcommand と、上の要素より下の名前）
+//        + options（定義の順。boolean は true の時だけ flag、string/number は flag と値の 2 引数）
+//        + [`--`（positional を渡す時）] + positionals（定義の順。省略できるのは optional のものだけ）
+// args は呼ぶ葉の spec.in だけで読む。
+function buildArgv(command, args, head = []) {
   const spec = command.spec || {};
   const input = spec.in || {};
   const options = input.options || {};
@@ -29,8 +55,7 @@ function buildArgv(command, args) {
     if (!known.has(key)) throw new UsageError(`未定義の引数: ${key}`);
   }
 
-  const argv = [];
-  if (spec.subcommand) argv.push(spec.subcommand);
+  const argv = [...head];
 
   for (const [name, def] of Object.entries(options)) {
     const v = args[name];
@@ -44,6 +69,7 @@ function buildArgv(command, args) {
   }
 
   let skipped = null;
+  let separated = false;
   for (const p of positionals) {
     const v = args[p.name];
     if (v === undefined || v === null) {
@@ -52,6 +78,11 @@ function buildArgv(command, args) {
       continue;
     }
     if (skipped) throw new UsageError(`${skipped} を省略して後ろの ${p.name} は渡せない`);
+    // `-` で始まる値が option と読まれないよう、最初の positional の前に `--` を入れる
+    if (!separated) {
+      argv.push('--');
+      separated = true;
+    }
     argv.push(scalar(p.name, p.type, v));
   }
   return argv;
@@ -69,16 +100,15 @@ function main(argv) {
     throw new UsageError('使い方: superbash-run <command 名> [<args の JSON>]');
   }
   const config = JSON.parse(fs.readFileSync(path.join(ROOT, '.manifest', 'toolconfig.json'), 'utf8'));
-  const command = (config.commands || []).find((c) => c.name === name);
-  if (!command) throw new UsageError(`command が無い: ${name}`);
+  const { top, node, head } = resolveLeaf(config.commands || [], name);
   let args;
   try {
     args = JSON.parse(argsJson);
   } catch (e) {
     throw new UsageError(`args が JSON でない: ${e.message}`);
   }
-  const childArgv = buildArgv(command, args);
-  const entry = path.join(ROOT, 'tools', command.tool, config.tools[command.tool].entry);
+  const childArgv = buildArgv(node, args, head);
+  const entry = path.join(ROOT, 'tools', top.tool, config.tools[top.tool].entry);
 
   const child = spawn(entry, childArgv, { stdio: 'inherit' }); // shell を通さない
   child.on('error', (e) => {
@@ -100,4 +130,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildArgv };
+module.exports = { buildArgv, resolveLeaf };

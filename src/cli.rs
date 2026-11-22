@@ -2,7 +2,7 @@
 
 use clap::Parser;
 
-use crate::config::Command;
+use crate::config::{Command, all_sequences, split_seq};
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 7391;
@@ -14,7 +14,8 @@ pub struct Cli {
     #[arg(long)]
     pub only_install: bool,
 
-    /// 実行できる command（指定無し=全部、'a,b'=その command だけ、''=無し）
+    /// 実行できる command（指定無し=全部、'a,b'=その名前だけ、''=無し）。名前は並びの名前
+    /// （'a b c'）で、群の名前ならその下の全部
     #[arg(long, value_name = "CMDS")]
     pub allow_cmd: Option<String>,
 
@@ -45,39 +46,68 @@ pub enum AllowCmd {
 }
 
 impl AllowCmd {
+    /// 名前は並びの名前（空白で区切る。前後の空白は捨て、続いた空白は 1 つの区切り）。
     pub fn parse(arg: Option<&str>) -> Self {
         match arg {
             None => AllowCmd::All,
             Some(s) => AllowCmd::Only(
                 s.split(',')
-                    .map(str::trim)
+                    .map(|n| split_seq(n).join(" "))
                     .filter(|n| !n.is_empty())
-                    .map(String::from)
                     .collect(),
             ),
         }
     }
 
-    /// toolconfig.json の並び順のまま、実行できる command を返す。
-    pub fn select<'a>(&self, commands: &'a [Command]) -> Vec<&'a Command> {
+    /// 葉の並びの名前 `seq` が実行できるか。許す名前が `seq` の先頭の語の並びなら許す
+    /// （群の名前ならその下の全部、葉の名前ならその葉だけ）。
+    fn allows(&self, seq: &[&str]) -> bool {
         match self {
-            AllowCmd::All => commands.iter().collect(),
-            AllowCmd::Only(names) => commands
-                .iter()
-                .filter(|c| names.iter().any(|n| n == &c.name))
-                .collect(),
+            AllowCmd::All => true,
+            AllowCmd::Only(names) => names.iter().any(|n| seq.starts_with(&split_seq(n))),
         }
     }
 
-    /// toolset に無い名前（typo の気付き用。拒絶はしない）。
+    /// toolconfig.json の並び順のまま、実行できる要素だけの木を返す
+    /// （実行できる葉を持たない群は落とす）。
+    pub fn select(&self, commands: &[Command]) -> Vec<Command> {
+        fn prune(a: &AllowCmd, c: &Command, path: &mut Vec<String>) -> Option<Command> {
+            path.push(c.name.clone());
+            let kept = if c.is_group() {
+                let subs: Vec<Command> = c
+                    .subcommands
+                    .iter()
+                    .filter_map(|s| prune(a, s, path))
+                    .collect();
+                (!subs.is_empty()).then(|| Command {
+                    subcommands: subs,
+                    ..c.clone()
+                })
+            } else {
+                let seq: Vec<&str> = path.iter().map(String::as_str).collect();
+                a.allows(&seq).then(|| c.clone())
+            };
+            path.pop();
+            kept
+        }
+        commands
+            .iter()
+            .filter_map(|c| prune(self, c, &mut Vec::new()))
+            .collect()
+    }
+
+    /// toolset に無い名前（typo の気付き用。拒絶はしない）。群・葉のどの並びの名前とも一致しない物。
     pub fn unknown_names<'a>(&'a self, commands: &[Command]) -> Vec<&'a str> {
         match self {
             AllowCmd::All => Vec::new(),
-            AllowCmd::Only(names) => names
-                .iter()
-                .filter(|n| !commands.iter().any(|c| &c.name == *n))
-                .map(String::as_str)
-                .collect(),
+            AllowCmd::Only(names) => {
+                let known = all_sequences(commands);
+                names
+                    .iter()
+                    .filter(|n| !known.contains(n))
+                    .map(String::as_str)
+                    .collect()
+            }
         }
     }
 }
@@ -130,6 +160,42 @@ mod tests {
     fn empty_allow_cmd_means_none() {
         let c = parse(&["t", "--allow-cmd", ""]);
         assert_eq!(c.allow(), AllowCmd::Only(vec![]));
+    }
+
+    const TREE: &str = r#"[
+      {"name":"gh","tool":"x","spec":{"subcommand":"gh"},"subcommands":[
+        {"name":"repo","subcommands":[{"name":"create","spec":{}}]},
+        {"name":"release","subcommands":[{"name":"create","spec":{}},{"name":"list","spec":{}}]}]},
+      {"name":"old","tool":"x","spec":{}}]"#;
+
+    #[test]
+    fn allow_group_leaf_and_unknown_names() {
+        let t: Vec<Command> = serde_json::from_str(TREE).unwrap();
+        let sel = |a: &str| all_sequences(&AllowCmd::parse(Some(a)).select(&t));
+        // 群: その下の全部
+        assert_eq!(
+            sel("gh release"),
+            ["gh", "gh release", "gh release create", "gh release list"]
+        );
+        // 葉: その葉だけ（空白は正規化）
+        assert_eq!(
+            sel("  gh   release  list "),
+            ["gh", "gh release", "gh release list"]
+        );
+        // 上の要素: 下の全部
+        assert_eq!(sel("gh").len(), 6);
+        // 複数
+        assert_eq!(
+            sel("gh repo create,old"),
+            ["gh", "gh repo", "gh repo create", "old"]
+        );
+        // 知らない名前は何も選ばず、警告の対象になる
+        assert!(sel("nope,gh nope").is_empty());
+        let a = AllowCmd::parse(Some("nope,gh release,gh release x,old"));
+        assert_eq!(a.unknown_names(&t), ["nope", "gh release x"]);
+        // 全部・無し
+        assert_eq!(all_sequences(&AllowCmd::All.select(&t)).len(), 7);
+        assert!(AllowCmd::parse(Some("")).select(&t).is_empty());
     }
 
     #[test]
