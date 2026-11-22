@@ -64,6 +64,12 @@ pub fn mcp(
     use crate::mcp::http;
     use crate::mcp::server::SuperbashServer;
 
+    // HOME・TMPDIR が使えない値なら、待ち受ける前に理由を出して終わる
+    let path_env = if sandbox {
+        Some(PathEnv::from_process()?)
+    } else {
+        None
+    };
     let mech = if sandbox {
         let m = Mechanism::detect()?;
         m.probe()?;
@@ -77,14 +83,20 @@ pub fn mcp(
     let commands = allow.select(&config.commands);
     let runs_dir = npm.cache_dir()?.join("_superbash").join("runs");
     let mut runner = Runner::new(npm.clone(), generated.tarball, runs_dir.clone());
-    if let Some(mech) = mech {
+    if let (Some(mech), Some(path_env)) = (mech, path_env) {
         let sb = Sandbox::new(
             mech,
-            PathEnv::from_process()?,
+            path_env,
             &generated.package_dir,
             &runs_dir,
             &config.tools,
         );
+        for (tool, p) in sb.missing_write_paths() {
+            eprintln!(
+                "superbash: sandbox: 警告: tools.{tool}.sandbox.write の {} が無い（この path には書き込めない）",
+                p.display()
+            );
+        }
         runner = runner.with_sandbox(sb, config.commands.clone());
     }
     let server = SuperbashServer::new(commands, runner);

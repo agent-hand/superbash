@@ -97,6 +97,12 @@ tool は、実行の入口（`entry`）に加えて、読み込んでも走ら�
   - `write`: 書き込みを許す path。`~`・`$TMPDIR`・`.`（superbash の作業 dir）で始められ、展開は superbash が行う。それ以外は絶対 path。
   - `network`: 外への通信を許すか（既定 false）。宛先・アドレスは書けない。
   - 項が無い tool: network false、write は superbash の置き場（生成した package・background の出力）と一時の dir だけ。項がある tool の write は書いた物だけ。
+  - Linux は PATH の絶対 path の要素だけから `bwrap` を探す（空・相対の要素は捨てる）。`HOME`・`TMPDIR` が空・相対 path なら、起動の時に理由を出して終了する（絶対 path にする）。bwrap には `--new-session` を付け、tool を端末から切り離す。
+  - 在る write の path だけが bind される。`write` に在るのに存在しない path があれば、起動の時に stderr へ警告を 1 行ずつ出す（止めない）。
+- 注意（絞る範囲の限り）:
+  - unix socket（`docker.sock` など）は、`network: false` でも絞らない。絞るのは書き込みとネットワーク（通信）で、socket の file に繋ぐ事は止めない。
+  - `write` に `~` を入れた tool は、home の外にしか書き込みの制限が効かない（home の下は全部書ける）。
+  - project（作業 dir）が home の外にある時は、`write` にその path（例 `.`）を足す必要がある。
 - `--only-install` とは一緒に使えない。
 - 方式の詳細は [docs/superbash-design.md](docs/superbash-design.md) の 2 章。
 
