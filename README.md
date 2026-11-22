@@ -11,7 +11,7 @@ superbash --only-install [--allow-cmd <cmds>] <toolset>
 
 MCP の mode（既定）は、Streamable HTTP の MCP server として待ち受ける（利用者の決定: stdio の口は持たない）。
 
-- toolset には local の path も渡せる。相対の path は起動した dir から解く。
+- toolset には local の path も渡せる。相対の path は起動した dir から解く（`./` か `../` か `file:` で書く）。
 - 既定の待ち受けは `127.0.0.1:7391`、endpoint は `/mcp`。`--host`・`--port` で変える。`--port 0` は空き port。
 - 起動すると、待ち受けの address を 1 行（stdout）に出す: `superbash: listening on http://127.0.0.1:7391/mcp`
 - `--allow-cmd` と `--only-install`（設計 2 章）。`--allow-cmd` の名前は並びの名前（空白で区切る）で書ける: 群の名前（`'github release'`）ならその下の全部、葉の名前（`'github release create'`）ならその葉だけ。空白を含むので shell では quote する。知らない名前は警告だけ。`--only-install` で絞れるのは tool の bin の単位まで。

@@ -25,10 +25,13 @@ pub struct FetchedToolset {
 /// それ以外（`github:`・`user/repo`・`name@版` など）も変えない。
 pub fn resolve_toolset(spec: &str, base: &Path) -> String {
     if let Some(rest) = spec.strip_prefix("file:") {
-        if is_absolute_like(rest) {
-            return spec.to_string();
+        // npm は `file:` の直後の `/{1,3}` を飛ばして `.`・`..` が続けば相対として扱う（`file:/../x` は `file:../x` 相当）。
+        let trimmed = rest.trim_start_matches('/');
+        let slashes = rest.len() - trimmed.len();
+        if slashes <= 3 && is_dot_relative(trimmed) {
+            return format!("file:{}", base.join(trimmed).display());
         }
-        return format!("file:{}", base.join(rest).display());
+        return spec.to_string();
     }
     if spec.starts_with('.') {
         return base.join(spec).display().to_string();
@@ -36,9 +39,10 @@ pub fn resolve_toolset(spec: &str, base: &Path) -> String {
     spec.to_string()
 }
 
-/// `/` 始まり（`//` を含む）か `~` 始まりの path は、cwd に依らず決まる。
-fn is_absolute_like(p: &str) -> bool {
-    p.starts_with('/') || p == "~" || p.starts_with("~/")
+/// `.` か `..` で、`/` か末尾が続く形（`./x` `../x` `.` `..`）。
+fn is_dot_relative(p: &str) -> bool {
+    let first = p.split('/').next().unwrap_or("");
+    first == "." || first == ".."
 }
 
 /// `workdir`（既存の空 dir）に tarball を取り、`workdir/extract/package` に展開する。
@@ -81,7 +85,11 @@ mod tests {
         assert_eq!(r("."), "/work/proj/.");
         assert_eq!(r("file:./x"), "file:/work/proj/./x");
         assert_eq!(r("file:../x"), "file:/work/proj/../x");
-        assert_eq!(r("file:x"), "file:/work/proj/x");
+        assert_eq!(r("file:/./x"), "file:/work/proj/./x");
+        assert_eq!(r("file:/../x"), "file:/work/proj/../x");
+        assert_eq!(r("file:///../x"), "file:/work/proj/../x");
+        assert_eq!(r("file:.."), "file:/work/proj/..");
+        assert_eq!(r(".hid"), "/work/proj/.hid");
     }
 
     #[test]
@@ -91,6 +99,9 @@ mod tests {
             "~/tools",
             "file:/abs/x",
             "file:///abs/x",
+            "file:",
+            "file:x",
+            "~",
             "file:~/x",
             "github:agent-hand/superbash-bantou",
             "agent-hand/superbash-bantou",

@@ -349,6 +349,7 @@ async fn relative_path_toolset_resolves_from_launch_dir() {
         ("mcp-relpath-dot", "./probe-tools"),
         ("mcp-relpath-dotdot", "../mcp-relpath-dotdot/probe-tools"),
         ("mcp-relpath-file", "file:./probe-tools"),
+        ("mcp-relpath-file-slash", "file:/../mcp-relpath-file-slash/probe-tools"),
     ] {
         let sb = Sandbox::new(name);
         copy_dir(&demo(), &sb.root.join("probe-tools"));
