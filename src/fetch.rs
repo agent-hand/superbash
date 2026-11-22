@@ -22,13 +22,20 @@ pub struct FetchedToolset {
 /// toolset の指定が local の path なら、相対 path を `base`（superbash を起動した dir）から解いて絶対にする。
 /// local の判定は npm に合わせる: `.` で始まる物（`./` `../`）、`~/`、`/`、`file:`。
 /// `~/` と絶対 path、`file:` の絶対（`file:/x` `file:///x` `file:~/x`）はそのまま。
+/// `file:x` `file:`（のみ）と `file:/../x` `file:///./x` は相対として解く。
 /// それ以外（`github:`・`user/repo`・`name@版` など）も変えない。
 pub fn resolve_toolset(spec: &str, base: &Path) -> String {
     if let Some(rest) = spec.strip_prefix("file:") {
-        // npm は `file:` の直後の `/{1,3}` を飛ばして `.`・`..` が続けば相対として扱う（`file:/../x` は `file:../x` 相当）。
+        // `file:` の直後が `/` 無しなら、`~`・`~/` 以外は相対（`file:x` `file:` も起動 dir 基点）。
+        // `/{1,3}` の後に `.`・`..` が続く形は npm が相対として扱う（`file:/../x` は `file:../x` 相当）。
         let trimmed = rest.trim_start_matches('/');
         let slashes = rest.len() - trimmed.len();
-        if slashes <= 3 && is_dot_relative(trimmed) {
+        let relative = if slashes == 0 {
+            rest != "~" && !rest.starts_with("~/")
+        } else {
+            slashes <= 3 && is_dot_relative(trimmed)
+        };
+        if relative {
             return format!("file:{}", base.join(trimmed).display());
         }
         return spec.to_string();
@@ -90,6 +97,10 @@ mod tests {
         assert_eq!(r("file:///../x"), "file:/work/proj/../x");
         assert_eq!(r("file:.."), "file:/work/proj/..");
         assert_eq!(r(".hid"), "/work/proj/.hid");
+        assert_eq!(r("./.hid"), "/work/proj/./.hid");
+        assert_eq!(r("file:x"), "file:/work/proj/x");
+        assert_eq!(r("file:"), "file:/work/proj/");
+        assert_eq!(r("file:///./x"), "file:/work/proj/./x");
     }
 
     #[test]
@@ -99,9 +110,9 @@ mod tests {
             "~/tools",
             "file:/abs/x",
             "file:///abs/x",
-            "file:",
-            "file:x",
             "~",
+            "file:/.hid",
+            "file:////../x",
             "file:~/x",
             "github:agent-hand/superbash-bantou",
             "agent-hand/superbash-bantou",
