@@ -1,6 +1,6 @@
 {
   "name": "superbash-linux-arm64",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "superbash の linux arm64 用の実行 file",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/agent-hand/superbash.git" },

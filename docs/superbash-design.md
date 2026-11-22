@@ -126,6 +126,8 @@ superbash <toolset> [--allow-cmd …]
 - **S3 絞る範囲**: 書き込みとネットワークだけ。読み取りは絞らない。
   - Linux: `--ro-bind / /`、`--dev /dev`、`--proc /proc`、write の path を `--bind`（在る path だけ）、network false なら `--unshare-net`、`--die-with-parent`。
   - macOS: `(allow default)`、`(deny file-write*)` の後に write の path の `subpath` と `/dev/null` などだけを許す。network false なら `(deny network*)`（unix socket だけ許す）。path は symlink を解決した実体で書く（`/tmp` → `/private/tmp`）。
+  - 0.4.1 での補い: Linux は PATH の絶対 path の要素だけから bwrap を探す（空・相対の要素は捨てる）。bwrap に `--new-session` を足す（端末から切り離す）。`HOME`・`TMPDIR` が空・相対 path の時は、path の展開に使わず、`--sandbox` の起動の時に理由を出して終了する。write の path（展開した物）が存在しなければ、起動の時に stderr へ警告を 1 行ずつ出す（止めない）。
+  - 範囲の限り（S3 の範囲は書き込みとネットワークだけ）: unix socket（`docker.sock` など）は `network: false` でも絞らない。write に `~` を入れた tool は、home の外にしか書き込みの制限が効かない。project が home の外にある時は、write に足す必要がある。
 - **S4 方針（manifest）**: `tools.<名前>.sandbox = { "write": [path...], "network": true|false }`。宛先・アドレスは書かない（知らない key は読み込みで誤り）。
   - path は `~`（home）・`$TMPDIR`・`.`（superbash の作業 dir）で始められる。展開は superbash が行う。それ以外は絶対 path で、相対 path と `..` は誤り。
   - 項が無い tool の既定は network false、write は superbash の置き場（生成した package の dir・background の出力の dir）と一時の dir（`$TMPDIR`・`/tmp`・`/var/tmp`）だけ。

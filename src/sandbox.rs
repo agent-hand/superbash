@@ -47,14 +47,32 @@ pub struct PathEnv {
 
 impl PathEnv {
     pub fn from_process() -> Result<Self> {
+        Self::from_values(
+            std::env::var_os("HOME").as_deref(),
+            std::env::var_os("TMPDIR").as_deref(),
+            std::env::current_dir().context("作業 dir を知れない")?,
+        )
+    }
+
+    /// HOME・TMPDIR は、無ければ（HOME は展開の時に誤り、TMPDIR は /tmp）。在るのに空・相対 path なら、
+    /// path の展開に使わず理由つきの誤り（絶対 path を要求する）。
+    pub fn from_values(home: Option<&OsStr>, tmpdir: Option<&OsStr>, cwd: PathBuf) -> Result<Self> {
+        let abs = |name: &str, v: &OsStr| -> Result<PathBuf> {
+            let p = PathBuf::from(v);
+            if !p.is_absolute() {
+                bail!(
+                    "--sandbox: {name} は絶対 path にして（空・相対 path は展開に使えない）: {v:?}"
+                );
+            }
+            Ok(p)
+        };
         Ok(PathEnv {
-            home: std::env::var_os("HOME")
-                .filter(|h| !h.is_empty())
-                .map(PathBuf::from),
-            tmpdir: std::env::var_os("TMPDIR")
-                .filter(|h| !h.is_empty())
-                .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from),
-            cwd: std::env::current_dir().context("作業 dir を知れない")?,
+            home: home.map(|h| abs("HOME", h)).transpose()?,
+            tmpdir: tmpdir
+                .map(|t| abs("TMPDIR", t))
+                .transpose()?
+                .unwrap_or_else(|| PathBuf::from("/tmp")),
+            cwd,
         })
     }
 
@@ -121,7 +139,9 @@ impl Mechanism {
             }
             "linux" => {
                 let found = path_var.and_then(|p| {
+                    // 空の要素・相対の要素は捨てる（cwd の bwrap を拾わない）。絶対 path の要素だけから探す
                     std::env::split_paths(p)
+                        .filter(|d| d.is_absolute())
                         .map(|d| d.join("bwrap"))
                         .find(|f| f.is_file())
                 });
@@ -213,6 +233,7 @@ fn real_path(p: &Path) -> PathBuf {
 
 /// bwrap の引数（実行 file の後ろ、program の前）。末尾は `--`。
 /// 読み取りは絞らない（`--ro-bind / /`）。write の path だけ `--bind`。network false なら `--unshare-net`。
+/// `--new-session` で端末から切り離す（端末への入力の注入を防ぐ）。
 pub fn bwrap_args(write: &[PathBuf], network: bool) -> Vec<OsString> {
     let mut v: Vec<OsString> = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
         .iter()
@@ -226,6 +247,7 @@ pub fn bwrap_args(write: &[PathBuf], network: bool) -> Vec<OsString> {
     if !network {
         v.push("--unshare-net".into());
     }
+    v.push("--new-session".into());
     v.push("--die-with-parent".into());
     v.push("--".into());
     v
@@ -330,6 +352,26 @@ impl Sandbox {
         }
     }
 
+    /// 項のある tool の write で、展開した path が無い物（tool 名, path）。bwrap はこの path を write に入れない
+    /// （bind できない）ので、起動の時に利用者へ知らせる。展開できない物は、呼ぶ時の誤りに任せて数えない。
+    pub fn missing_write_paths(&self) -> Vec<(String, PathBuf)> {
+        let mut out = Vec::new();
+        for (name, def) in &self.tools {
+            if def.is_none() {
+                continue;
+            }
+            if let Ok(pol) = self.policy(name) {
+                out.extend(
+                    pol.write
+                        .into_iter()
+                        .filter(|p| !p.exists())
+                        .map(|p| (name.clone(), p)),
+                );
+            }
+        }
+        out
+    }
+
     pub fn prefix_for(&self, tool: &str) -> Result<Vec<OsString>> {
         Ok(self.mech.prefix(&self.policy(tool)?))
     }
@@ -402,12 +444,14 @@ mod tests {
                 "/tmp",
                 "/tmp",
                 "--unshare-net",
+                "--new-session",
                 "--die-with-parent",
                 "--"
             ]
         );
         let open = strs(&bwrap_args(&[], true));
         assert!(!open.contains(&"--unshare-net".to_string()));
+        assert!(open.contains(&"--new-session".to_string()));
         assert_eq!(open.last().unwrap(), "--");
         // 空白・引用符を含む path も 1 引数のまま
         let odd = bwrap_args(&[PathBuf::from("/a b/\"c\"")], true);
@@ -498,6 +542,90 @@ mod tests {
         assert_eq!(s.len(), 3);
         assert_eq!(s[1], "-p");
         assert!(strs(&s)[2].contains("/definitely/missing/dir"));
+    }
+
+    #[test]
+    fn home_and_tmpdir_must_be_absolute() {
+        let cwd = || PathBuf::from("/w");
+        let ok = |h: Option<&str>, t: Option<&str>| {
+            PathEnv::from_values(h.map(OsStr::new), t.map(OsStr::new), cwd())
+        };
+        let e = ok(Some(""), None).unwrap_err().to_string();
+        assert!(e.contains("HOME") && e.contains("絶対"), "{e}");
+        assert!(ok(Some("rel/home"), None).is_err());
+        let e = ok(None, Some("")).unwrap_err().to_string();
+        assert!(e.contains("TMPDIR"), "{e}");
+        assert!(ok(None, Some("tmp")).is_err());
+        // 無い物は誤りにしない（TMPDIR は /tmp、HOME は展開の時に誤り）
+        let e = ok(None, None).unwrap();
+        assert_eq!((e.home, e.tmpdir), (None, PathBuf::from("/tmp")));
+        let e = ok(Some("/h"), Some("/t")).unwrap();
+        assert_eq!((e.home, e.tmpdir), (Some("/h".into()), "/t".into()));
+    }
+
+    #[test]
+    fn missing_write_paths_are_reported_for_explicit_entries() {
+        let t = tools(
+            r#"{"plain":{"entry":"m.js"},
+                "mac":{"entry":"m.js","sandbox":{"write":["~/.nope-sbx","$TMPDIR","/definitely/missing"]}}}"#,
+        );
+        let sb = Sandbox::new(
+            Mechanism::Bwrap("/usr/bin/bwrap".into()),
+            PathEnv {
+                home: Some("/definitely/home".into()),
+                tmpdir: std::env::temp_dir(),
+                cwd: "/".into(),
+            },
+            Path::new("/cache/p"),
+            Path::new("/cache/r"),
+            &t,
+        );
+        let m = sb.missing_write_paths();
+        assert_eq!(
+            m,
+            [
+                (
+                    "mac".to_string(),
+                    PathBuf::from("/definitely/home/.nope-sbx")
+                ),
+                ("mac".to_string(), PathBuf::from("/definitely/missing")),
+            ]
+        );
+    }
+
+    #[test]
+    fn detect_ignores_empty_and_relative_path_elements() {
+        let none = Path::new("/nonexistent/sandbox-exec");
+        let d = std::env::temp_dir().join(format!("sbx-rel-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("bwrap"), "").unwrap();
+        // 相対の要素（cwd から見て bwrap が在る）・空の要素は、在っても拾わない
+        let cwd = std::env::current_dir().unwrap();
+        let rel_to_cwd = pathdiff_rel(&cwd, &d);
+        let p = std::env::join_paths([
+            PathBuf::from(""),
+            rel_to_cwd,
+            PathBuf::from("bin"),
+            PathBuf::from("/nonexistent"),
+        ])
+        .unwrap();
+        assert!(Mechanism::detect_for("linux", Some(&p), none).is_err());
+        // 絶対の要素なら、空・相対の要素が前後に在っても見つかる
+        let p = std::env::join_paths([PathBuf::new(), PathBuf::from("x"), d.clone()]).unwrap();
+        assert_eq!(
+            Mechanism::detect_for("linux", Some(&p), none).unwrap(),
+            Mechanism::Bwrap(d.join("bwrap"))
+        );
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// `from` から見た `to` の相対 path（`..` を重ねる。test 用）。
+    fn pathdiff_rel(from: &Path, to: &Path) -> PathBuf {
+        let mut r = PathBuf::new();
+        for _ in from.components().skip(1) {
+            r.push("..");
+        }
+        r.join(to.strip_prefix("/").unwrap())
     }
 
     #[test]
