@@ -27,6 +27,21 @@ pub struct ToolDef {
     /// ある tool は振り分けの file から呼ばれる（設計 3 章・作法 5.4）。無ければ entry を直に起動する。
     #[serde(default)]
     pub module: Option<String>,
+    /// `--sandbox` の時の方針（書き込みとネットワークだけ。無ければ既定）
+    #[serde(default)]
+    pub sandbox: Option<SandboxDef>,
+}
+
+/// `tools.<名前>.sandbox`（設計 2 章「sandbox の中での実行」）。宛先・アドレスは持たない。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxDef {
+    /// 書き込みを許す path。`~`・`$TMPDIR`・`.` で始められる（展開は superbash）。それ以外は絶対 path
+    #[serde(default)]
+    pub write: Vec<String>,
+    /// 外への通信を許すか（既定 false）
+    #[serde(default)]
+    pub network: bool,
 }
 
 /// 要素（設計 3.2）。`commands[]` の 1 つ（上の要素）か、その下の `subcommands[]` の 1 つ。
@@ -234,6 +249,12 @@ impl ToolConfig {
             if t.module.as_deref() == Some("") {
                 bail!("tools.{name}.module が空");
             }
+            if let Some(sb) = &t.sandbox {
+                for p in &sb.write {
+                    crate::sandbox::check_path_form(p)
+                        .with_context(|| format!("tools.{name}.sandbox.write"))?;
+                }
+            }
         }
         check_siblings(&self.commands, "")?;
         for c in &self.commands {
@@ -357,6 +378,34 @@ mod tests {
         assert!(
             parse(&OK.replace(r#""entry":"main.js""#, r#""entry":"m.js","module":"""#)).is_err()
         );
+    }
+
+    #[test]
+    fn sandbox_def_loads_and_rejects_unknown_keys_and_bad_paths() {
+        let with = |sb: &str| {
+            parse(&OK.replace(
+                r#""entry":"main.js""#,
+                &format!(r#""entry":"main.js","sandbox":{sb}"#),
+            ))
+        };
+        assert_eq!(parse(OK).unwrap().tools["x"].sandbox, None);
+        let c = with(r#"{"write":["~","$TMPDIR/x","./out","/var/x"],"network":true}"#).unwrap();
+        let sb = c.tools["x"].sandbox.clone().unwrap();
+        assert_eq!(sb.write.len(), 4);
+        assert!(sb.network);
+        // 項の中が空なら write 無し・network false
+        assert_eq!(
+            with("{}").unwrap().tools["x"].sandbox,
+            Some(SandboxDef::default())
+        );
+        // 宛先・アドレスなどの知らない key は持てない
+        assert!(with(r#"{"hosts":["example.com"]}"#).is_err());
+        // 形の合わない path（相対・~user・$HOME・空）
+        for bad in ["out", "~root", "$HOME/x", "", ".hidden", "$TMPDIRX"] {
+            let sb = serde_json::json!({ "write": [bad] }).to_string();
+            assert!(with(&sb).is_err(), "{bad}");
+        }
+        assert!(with(r#"{"network":"yes"}"#).is_err());
     }
 
     #[test]

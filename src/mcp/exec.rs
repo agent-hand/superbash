@@ -16,8 +16,10 @@ use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
+use crate::config::{Command as ToolCommand, split_seq};
 use crate::generate::WRAPPER_BIN;
 use crate::npm::Npm;
+use crate::sandbox::{SANDBOX_ENV, Sandbox};
 
 /// 時間の上限の既定（全 command 共通）。
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -53,6 +55,8 @@ pub struct Runner {
     tarball: PathBuf,
     runs_dir: PathBuf,
     seq: AtomicU64,
+    /// `--sandbox` の時: 方針と、command の名前から tool を引く木（全 command）
+    sandbox: Option<(Sandbox, Vec<ToolCommand>)>,
 }
 
 /// drop した時に、process group ごと止める（要求の取り消しでも残さない）。
@@ -94,11 +98,32 @@ impl Runner {
             tarball,
             runs_dir,
             seq: AtomicU64::new(0),
+            sandbox: None,
         }
     }
 
-    fn command(&self, name: &str, args_json: &str) -> Command {
+    /// tool の process を sandbox の中で起こす（wrapper に prefix を渡す）。
+    pub fn with_sandbox(mut self, sandbox: Sandbox, commands: Vec<ToolCommand>) -> Self {
+        self.sandbox = Some((sandbox, commands));
+        self
+    }
+
+    fn command(&self, name: &str, args_json: &str) -> Result<Command> {
         let mut c = self.npm.npx();
+        if let Some((sb, commands)) = &self.sandbox {
+            // 名前が引けない時は wrapper も引けず、tool を起こさずに使い方の誤りで終わる。
+            let top = split_seq(name)
+                .first()
+                .and_then(|w| commands.iter().find(|c| c.name == *w));
+            if let Some(top) = top {
+                let prefix: Vec<String> = sb
+                    .prefix_for(top.tool_name())?
+                    .iter()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect();
+                c.env(SANDBOX_ENV, serde_json::to_string(&prefix)?);
+            }
+        }
         c.arg("--yes")
             .arg(format!("--package={}", self.tarball.display()))
             .arg("--")
@@ -107,12 +132,12 @@ impl Runner {
             .arg(args_json);
         let mut c = Command::from(c);
         c.stdin(Stdio::null()).process_group(0);
-        c
+        Ok(c)
     }
 
     /// 完了するか時間切れまで待ち、その時までの出力を返す。
     pub async fn run(&self, name: &str, args_json: &str, timeout: Duration) -> Result<Outcome> {
-        let mut cmd = self.command(name, args_json);
+        let mut cmd = self.command(name, args_json)?;
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("npx を起動できない")?;
         let guard = GroupKill::new(&child);
@@ -167,7 +192,7 @@ impl Runner {
         };
         let file = File::create(&bg.output)?;
 
-        let mut cmd = self.command(name, args_json);
+        let mut cmd = self.command(name, args_json)?;
         cmd.stdout(Stdio::from(file.try_clone()?))
             .stderr(Stdio::from(file));
         let mut child = cmd.spawn().context("npx を起動できない")?;

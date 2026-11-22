@@ -10,7 +10,7 @@ fn main() -> ExitCode {
     let npm = Npm::default();
     let allow = cli.allow();
     let result = match cli.mode() {
-        Mode::Mcp => modes::mcp(&npm, &cli.toolset, &allow, &cli.host, cli.port),
+        Mode::Mcp => modes::mcp(&npm, &cli.toolset, &allow, &cli.host, cli.port, cli.sandbox),
         Mode::Install => modes::install(&npm, &cli.toolset, &allow),
     };
     match result {

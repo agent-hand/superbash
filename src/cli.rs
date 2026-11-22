@@ -19,6 +19,11 @@ pub struct Cli {
     #[arg(long, value_name = "CMDS")]
     pub allow_cmd: Option<String>,
 
+    /// tool の process を sandbox の中で起こす（書き込みとネットワークだけを絞る。MCP の mode だけ。
+    /// macOS は sandbox-exec、Linux は PATH の bwrap。仕組みが無ければ理由を出して終了する）
+    #[arg(long, conflicts_with = "only_install")]
+    pub sandbox: bool,
+
     /// MCP の mode で待ち受ける host（既定 127.0.0.1）
     #[arg(long, default_value = DEFAULT_HOST)]
     pub host: String,
@@ -141,6 +146,13 @@ mod tests {
         assert_eq!(c.allow(), AllowCmd::All);
         assert_eq!(c.toolset, "@example/tools@1.2.0");
         assert_eq!((c.host.as_str(), c.port), ("127.0.0.1", 7391));
+    }
+
+    #[test]
+    fn sandbox_is_off_by_default_and_not_for_only_install() {
+        assert!(!parse(&["t"]).sandbox);
+        assert!(parse(&["--sandbox", "t"]).sandbox);
+        assert!(Cli::try_parse_from(["superbash", "--sandbox", "--only-install", "t"]).is_err());
     }
 
     #[test]

@@ -46,7 +46,7 @@ superbash [option...] <toolset>
 
 | mode | 書き方 | 動作 |
 |---|---|---|
-| MCP（既定） | `superbash <toolset> [--allow-cmd …] [--host <host>] [--port <port>]` | Streamable HTTP の MCP server として待ち受け（既定 `127.0.0.1:7391`、endpoint は `/mcp`）、道具 `superbash-command` を出す |
+| MCP（既定） | `superbash <toolset> [--allow-cmd …] [--sandbox] [--host <host>] [--port <port>]` | Streamable HTTP の MCP server として待ち受け（既定 `127.0.0.1:7391`、endpoint は `/mcp`）、道具 `superbash-command` を出す |
 | install | `superbash --only-install <toolset> [--allow-cmd …]` | 生成した package を superbash の置き場に置き、`npm link` で入れる（command を名前で打てるように）。MCP は起動しない |
 
 - MCP の mode の待ち受け（利用者の決定: stdio の口は持たず、Streamable HTTP にする）:
@@ -110,14 +110,28 @@ superbash <toolset> [--allow-cmd …]
 - 入れる command の範囲は `--allow-cmd` の規則のとおり（指定無し = 全部、一覧 = その command だけ、`''` = 入れる command 無し）。
 - 置き場の生成した dir を消すと link が切れる（3.5 の実測）。
 
-### 将来の狙い（busybox 化・sandbox。今は書くだけ）
+### 将来の狙い（busybox 化・sandbox）
 
 利用者が「今の案」として示した、superbash に一括で手当てさせる理由:
 
 1. **busybox 化**: superbash が command を用意する工程で、command 群を busybox のような 1 つの多機能の実行 file にまとめる。（0.3.0 で、まとめる先を「1 つの実行 file」ではなく「1 つの振り分けの file」に決めて実装した。docs/toolset-convention.md の 5.4。single executable application は作らない。）
-2. **sandbox の中での実行**: superbash が、sandbox の中で実行する command 群を組み立てる。
+2. **sandbox の中での実行**: superbash が、sandbox の中で実行する command 群を組み立てる。（0.4.0 で実装した。次の「sandbox の中での実行」。）
 
-どちらも、toolset の取得から command の用意までを superbash が 1 か所で持つ事でできる。実現の方式（対象の言語・build の場所・OS ごとの sandbox の仕組みの差）はまだ決めていない。
+どちらも、toolset の取得から command の用意までを superbash が 1 か所で持つ事でできる。
+
+### sandbox の中での実行（0.4.0。利用者の決定）
+
+- **S1 起動の option**: `--sandbox`（MCP の mode だけ）。既定は無しで、今の振る舞いは変わらない。`--only-install` は対象外で、一緒に指定すると起動の時に誤りで終わる。
+- **S2 仕組み**: macOS は `/usr/bin/sandbox-exec` に、生成した profile（SBPL）を `-p` で渡す。Linux は PATH の `bwrap`（bubblewrap）に引数を渡す。どちらも引数の配列で組み、shell を通さない。`--sandbox` を指定して仕組みが無い時、または仕組みがあっても使えない時（user namespace が許されない等）は、起動の時に（待ち受ける前に）理由を出して終了する。
+- **S3 絞る範囲**: 書き込みとネットワークだけ。読み取りは絞らない。
+  - Linux: `--ro-bind / /`、`--dev /dev`、`--proc /proc`、write の path を `--bind`（在る path だけ）、network false なら `--unshare-net`、`--die-with-parent`。
+  - macOS: `(allow default)`、`(deny file-write*)` の後に write の path の `subpath` と `/dev/null` などだけを許す。network false なら `(deny network*)`（unix socket だけ許す）。path は symlink を解決した実体で書く（`/tmp` → `/private/tmp`）。
+- **S4 方針（manifest）**: `tools.<名前>.sandbox = { "write": [path...], "network": true|false }`。宛先・アドレスは書かない（知らない key は読み込みで誤り）。
+  - path は `~`（home）・`$TMPDIR`・`.`（superbash の作業 dir）で始められる。展開は superbash が行う。それ以外は絶対 path で、相対 path と `..` は誤り。
+  - 項が無い tool の既定は network false、write は superbash の置き場（生成した package の dir・background の出力の dir）と一時の dir（`$TMPDIR`・`/tmp`・`/var/tmp`）だけ。
+  - 項がある tool の write は、書いた物だけ（置き場と一時の dir は自動では足さない）。network の既定は false。
+  - 方針は tool の単位。command の名前から tool を引いて、その tool の方針を使う。
+- **S5 実行**: 組んだ「前に置く引数の列」（prefix）を、環境変数 `SUPERBASH_SANDBOX`（JSON の文字列の配列）で wrapper に渡す。wrapper は、tool の process（entry、または振り分けの file）を `prefix + program + argv` で起こす。npx と wrapper 自体は sandbox の外（npm の cache への書き込みを妨げない）。時間切れ・出力・background の扱いは変えない。prefix が読めない時は、sandbox 無しで起こさず止まる。`SUPERBASH_SANDBOX` は tool には渡さない。
 
 ---
 
@@ -448,6 +462,7 @@ mac の署名ビルドは、後の段で、toolset の command の 1 つとし�
 - only-install: `npm link` で入り、`cmdA` と `npx cmdA` が動く事。
 - MCP: MCP の client で `initialize`・`tools/list`・`tools/call` を通す事。Claude Code から `superbash-command` を呼べる事。
 - 配布: 各 OS・CPU（mac・Linux glibc）で npx から起動できる事。
+- sandbox: 引数・profile の組み立て（OS に依らない unit test）。bwrap がある Linux では、write の外への書き込みと、network false の時の外（127.0.0.1 の test の server）への接続が止まる事。macOS では sandbox-exec で同じ事。仕組みが無い host では skip。`--sandbox` 無しで今の test がそのまま通る事。
 - 静的な検査: source に shell を通す起動（`sh -c` など）が無い事。
 
 ---
@@ -458,7 +473,8 @@ mac の署名ビルドは、後の段で、toolset の command の 1 つとし�
 |---|---|
 | 第 1 段 | この素案の決定の全部（MCP の mode・`--only-install`・`--allow-cmd`・道具 `superbash-command`・wrapper・時間の上限と background・mac と Linux glibc の build） |
 | 後の段 | mac の署名ビルドを toolset の command の 1 つとして載せる |
-| 将来の狙い | busybox 化、sandbox の中での実行（2 章） |
+| 0.3.0 | busybox 化（2 章） |
+| 0.4.0 | sandbox の中での実行（2 章） |
 
 ---
 

@@ -49,16 +49,44 @@ pub fn prepare(
 }
 
 /// MCP の mode（既定）。Streamable HTTP の MCP server として `host:port` で待ち受ける（path は /mcp）。
-pub fn mcp(npm: &Npm, toolset: &str, allow: &AllowCmd, host: &str, port: u16) -> Result<()> {
+/// `sandbox` が true なら、tool の process を sandbox の中で起こす（仕組みが使えなければ、起動せず誤りで返す）。
+pub fn mcp(
+    npm: &Npm,
+    toolset: &str,
+    allow: &AllowCmd,
+    host: &str,
+    port: u16,
+    sandbox: bool,
+) -> Result<()> {
+    use crate::sandbox::{Mechanism, PathEnv, Sandbox};
+
     use crate::mcp::exec::Runner;
     use crate::mcp::http;
     use crate::mcp::server::SuperbashServer;
 
+    let mech = if sandbox {
+        let m = Mechanism::detect()?;
+        m.probe()?;
+        eprintln!("superbash: sandbox: {}", m.name());
+        Some(m)
+    } else {
+        None
+    };
     let generated = prepare(npm, toolset, allow, true)?;
     let config = ToolConfig::load(&generated.package_dir)?;
     let commands = allow.select(&config.commands);
     let runs_dir = npm.cache_dir()?.join("_superbash").join("runs");
-    let runner = Runner::new(npm.clone(), generated.tarball, runs_dir);
+    let mut runner = Runner::new(npm.clone(), generated.tarball, runs_dir.clone());
+    if let Some(mech) = mech {
+        let sb = Sandbox::new(
+            mech,
+            PathEnv::from_process()?,
+            &generated.package_dir,
+            &runs_dir,
+            &config.tools,
+        );
+        runner = runner.with_sandbox(sb, config.commands.clone());
+    }
     let server = SuperbashServer::new(commands, runner);
 
     let rt = tokio::runtime::Runtime::new().context("tokio を起動できない")?;

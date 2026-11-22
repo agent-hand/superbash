@@ -94,6 +94,22 @@ function scalar(name, type, v) {
   throw new UsageError(`${name} は ${type}`);
 }
 
+function withSandbox(program, programArgv) {
+  const raw = process.env.SUPERBASH_SANDBOX;
+  if (raw === undefined) return [program, programArgv];
+  delete process.env.SUPERBASH_SANDBOX; // tool には渡さない
+  let prefix;
+  try {
+    prefix = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`SUPERBASH_SANDBOX が JSON でない: ${e.message}`);
+  }
+  if (!Array.isArray(prefix) || prefix.length === 0 || prefix.some((a) => typeof a !== 'string')) {
+    throw new Error('SUPERBASH_SANDBOX は空でない文字列の配列でなければならない');
+  }
+  return [prefix[0], [...prefix.slice(1), program, ...programArgv]];
+}
+
 function main(argv) {
   const [name, argsJson = '{}'] = argv;
   if (!name || argv.length > 2) {
@@ -114,7 +130,10 @@ function main(argv) {
     ? [path.join(ROOT, 'dispatch', 'run.mjs'), [top.tool, ...childArgv]]
     : [path.join(ROOT, 'tools', top.tool, def.entry), childArgv];
 
-  const child = spawn(program, programArgv, { stdio: 'inherit' }); // shell を通さない
+  // --sandbox の時、superbash が組んだ prefix（JSON の文字列の配列。先頭が仕組みの実行 file）を前に置いて起動する。
+  // prefix が読めない時は、sandbox 無しで起こさず止める。
+  const [exe, exeArgv] = withSandbox(program, programArgv);
+  const child = spawn(exe, exeArgv, { stdio: 'inherit' }); // shell を通さない
   child.on('error', (e) => {
     process.stderr.write(`superbash-run: 起動できない: ${e.message}\n`);
     process.exit(127);

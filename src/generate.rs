@@ -308,3 +308,33 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 生成した中身の hash に、振り分けの file が入る（有る無し・中身の違いで hash が変わる）。
+    #[test]
+    fn dispatcher_is_part_of_the_content_hash() {
+        let dir = std::env::temp_dir().join(format!("sb-hash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("tools")).unwrap();
+        fs::write(dir.join("package.json"), "{}").unwrap();
+        let base = hash_dir(&dir).unwrap();
+        assert_eq!(base, hash_dir(&dir).unwrap());
+
+        let d = dir.join(DISPATCH_PATH);
+        fs::create_dir_all(d.parent().unwrap()).unwrap();
+        fs::write(&d, DISPATCH_SRC).unwrap();
+        let with = hash_dir(&dir).unwrap();
+        assert_ne!(base, with, "振り分けの file の有無が hash に出ない");
+
+        fs::write(&d, format!("{DISPATCH_SRC}\n// changed")).unwrap();
+        assert_ne!(
+            with,
+            hash_dir(&dir).unwrap(),
+            "振り分けの file の中身が hash に出ない"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}

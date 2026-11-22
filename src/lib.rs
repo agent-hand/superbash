@@ -8,3 +8,4 @@ pub mod install;
 pub mod mcp;
 pub mod modes;
 pub mod npm;
+pub mod sandbox;
