@@ -1,0 +1,42 @@
+{
+  "name": "box-tools",
+  "description": "busybox 化（module・振り分け）の test 用の toolset",
+  "owner": { "name": "example" },
+  "tools": {
+    "box-cli": { "entry": "dist/cli.mjs", "module": "dist/main.mjs" },
+    "plain-cli": { "entry": "main.js" }
+  },
+  "commands": [
+    {
+      "name": "echo",
+      "description": "受け取った argv を JSON で 1 行出す（module の run 経由）。",
+      "tool": "box-cli",
+      "spec": {
+        "subcommand": "echo",
+        "usage": "box-cli echo [--tag <t>] [<word>]",
+        "in": {
+          "options": { "tag": { "flag": "--tag", "type": "string", "description": "印" } },
+          "positionals": [{ "name": "word", "type": "string", "optional": true }]
+        }
+      }
+    },
+    {
+      "name": "bad",
+      "description": "使い方の誤り（run が 2 を返す）。",
+      "tool": "box-cli",
+      "spec": { "subcommand": "bad" }
+    },
+    {
+      "name": "fail",
+      "description": "その他の誤り（run が 1 を返す）。",
+      "tool": "box-cli",
+      "spec": { "subcommand": "fail" }
+    },
+    {
+      "name": "plain",
+      "description": "module の無い tool（entry を直に起動する）。",
+      "tool": "plain-cli",
+      "spec": { "subcommand": "plain" }
+    }
+  ]
+}

@@ -23,6 +23,10 @@ pub struct ToolConfig {
 pub struct ToolDef {
     /// `tools/<name>/` からの相対 path の入口
     pub entry: String,
+    /// `tools/<name>/` からの相対 path の module（読み込んでも走らない。`main` と `run` を export する）。
+    /// ある tool は振り分けの file から呼ばれる（設計 3 章・作法 5.4）。無ければ entry を直に起動する。
+    #[serde(default)]
+    pub module: Option<String>,
 }
 
 /// 要素（設計 3.2）。`commands[]` の 1 つ（上の要素）か、その下の `subcommands[]` の 1 つ。
@@ -226,6 +230,11 @@ impl ToolConfig {
     /// 兄弟の名前の重複、`name` の空白、`spec.subcommand` は上の要素だけ、葉は `spec` が必須、
     /// `help`（bin の直後の予約の語）、tool の参照先。
     fn validate(&self) -> Result<()> {
+        for (name, t) in &self.tools {
+            if t.module.as_deref() == Some("") {
+                bail!("tools.{name}.module が空");
+            }
+        }
         check_siblings(&self.commands, "")?;
         for c in &self.commands {
             let Some(tool) = &c.tool else {
@@ -330,6 +339,24 @@ mod tests {
             .map(|(k, _)| k)
             .collect();
         assert_eq!(keys, ["zeta", "alpha", "mid"]);
+    }
+
+    #[test]
+    fn tool_module_is_optional() {
+        assert_eq!(parse(OK).unwrap().tools["x"].module, None);
+        let c = parse(&OK.replace(
+            r#""entry":"main.js""#,
+            r#""entry":"dist/cli.mjs","module":"dist/main.mjs""#,
+        ))
+        .unwrap();
+        assert_eq!(c.tools["x"].module.as_deref(), Some("dist/main.mjs"));
+    }
+
+    #[test]
+    fn empty_module_is_error() {
+        assert!(
+            parse(&OK.replace(r#""entry":"main.js""#, r#""entry":"m.js","module":"""#)).is_err()
+        );
     }
 
     #[test]

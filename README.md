@@ -69,6 +69,15 @@ command は `subcommands`（同じ形の要素の配列。入れ子は何段で�
 - `subcommands` の無い今の形の toolset は、そのまま動く（ただし positional の前に `--` が入る）。
 - 新しい形の toolset は superbash 0.2.0 以上で使う（0.1.2 は `spec` の無い群を「形が不正」で止め、`spec` のある群の `subcommands` は黙って捨てる）。
 
+## busybox 化（0.3.0 から）
+
+tool は、実行の入口（`entry`）に加えて、読み込んでも走らない module を出せる。manifest の `tools.<名前>.module`（`tools/<名前>/` からの相対 path。例 `dist/main.mjs`）に書く。module は `main`（citty の command）と `run(rawArgs: string[]): Promise<number>`（使い方の誤りは 2、その他の誤りは 1 の終了 code）を export する。
+
+- superbash は生成した package に振り分けの file（`dispatch/run.mjs`）を置き、module のある tool の bin をそこへ向ける。link の名前（`--only-install`）か、第 1 引数（MCP の mode の wrapper が tool の名前を最初に渡す）で tool を選び、`run` の返す数を終了 code にする。
+- MCP の mode は今のとおり子の process を起こす（時間切れ・出力の扱いは変わらない）。
+- `module` の無い tool は、今のまま入口を直に起動する（互換）。
+- 決めた方式は [docs/toolset-convention.md](docs/toolset-convention.md) の 5.4。
+
 ## test
 
 ```

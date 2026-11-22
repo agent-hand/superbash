@@ -371,6 +371,39 @@ busybox 化の土台:
 - 1 つの実行 file（single executable application）にする形は、OS・CPU ごとの build が要り、「手元で生成して npx で動かす」今の形から離れる。将来の狙い（設計 2 章）の範囲で、今回は決めない。
 - sandbox は範囲外。
 
+### 5.4 決定した方式（版 0.3.0）
+
+5.3 の案のうち、次の形に決めた（master-cap の決定）。
+
+**tool の側（`dist/` に 2 つ出す）**
+
+- `dist/cli.mjs`: 実行の入口（今の entry）。`run(process.argv.slice(2))` の結果を終了 code にするだけ。
+- `dist/main.mjs`: 読み込んでも走らない module。次の 2 つを export する。
+  - `main`: citty の command。
+  - `run(rawArgs: string[]): Promise<number>`: `runCommand` を行い、使い方の誤りは 2、その他の誤りは 1 の終了 code を返す（成功は 0）。
+- manifest の `tools.<名前>.module` に module の path（`tools/<名前>/` からの相対。例 `dist/main.mjs`）を書く。`module` は省ける。
+
+```json
+"tools": { "publish": { "entry": "dist/cli.mjs", "module": "dist/main.mjs" } }
+```
+
+**superbash の側**
+
+- 生成の時に、振り分けの file を生成した package の `dispatch/run.mjs` に置く（superbash に埋め込んだ雛形。citty を持たない。選ばれた command の中で `import()` する物だけが citty を持つ）。module のある tool が 1 つも無ければ置かない。
+- `package.json` の `bin`: module のある tool の bin は `dispatch/run.mjs` を向ける（only-install でも MCP の mode でも）。module の無い tool は今のまま `tools/<名前>/<entry>` を直に向ける（互換）。
+- 振り分けの file は tool を 2 つの方法で選ぶ:
+  1. 呼ばれた link の名前（`process.argv[1]` の basename）が module のある tool の名前なら、その tool。残りの引数をそのまま `run` に渡す（only-install）。
+  2. 違えば、第 1 引数を tool の名前とする（MCP の mode の wrapper が、tool の名前を最初に渡す）。module のある tool でなければ、使い方の誤り（終了 code 2）。
+- 選んだ tool の module を `import()` し、`run` の返す数を終了 code にする。読み込み・実行で例外が出たら stderr に出して終了 code 1。
+- wrapper（MCP の mode）: module のある tool は、今のとおり子の process を起こす。起動するのは `dispatch/run.mjs` で、引数は `<tool の名前> <組んだ argv>`。時間切れ・出力の扱いは変えない。同じ process での実行はしない。module の無い tool は entry を直に起動する。
+- 生成した中身の hash に、振り分けの file も入る（中身の dir を全部見る hash のため）。
+- 1 つの実行 file（single executable application）は作らない。
+
+**決めなかった物（5.3 からの変更点）**
+
+- 5.3 の `subCommands` を振り分けの file が持つ案は採らない。振り分けの file は citty を持たず、tool の `run` に任せる。citty は tool ごとに `dist/` に入ったまま（同じ process には選んだ tool の 1 つ分だけ読み込まれる）。
+- MCP の mode の同じ process での実行は採らない。
+
 ---
 
 ## 6. 決めた事（未決だった 10 件）
@@ -561,11 +594,11 @@ busybox 化の土台:
 | `wrapper/run.js`（argv の組み方） | 並びの名前で葉を探す（群なら子の一覧を誤りで返す）。argv に `spec.subcommand` と並びの名前を足す。positionals の前の `--` | 3.3・6.8・6.10 |
 | `src/mcp/server.rs`（道具の説明・照合） | 説明を木の形で作る（量の扱い）。`name` を並びの名前で照合する。input schema の `name` の説明（「サブコマンドは空白で区切った並び」） | 6.1・6.3 |
 | `src/cli.rs`（`--allow-cmd`） | 並びの名前・群の名前を受ける。知らない名前の警告を並びの名前で | 6.6 |
-| `src/generate.rs` | 今は変えない（bin は tool ごと）。busybox 化の時に振り分けの file を置く | 5.3 |
+| `src/generate.rs` | 0.3.0 で、module のある tool の bin を振り分けの file に向け、振り分けの file を置く | 5.4 |
 | `docs/superbash-design.md` | 3 章（要素の形・argv・宛先の作法・道具ごとの dir の推奨構成。この文書を参照）、4 章（`--`）、6 章（説明・`name`） | 全体 |
 | `README.md`・test | 入れ子の fixture（3 段）。`--allow-cmd` の群・葉。古い形の fixture がそのまま通る事 | 3.7 |
 
 - 決定 5 について superbash 自身が変える物は無い（superbash は今も宛先を持たない）。作法として設計 3 章に書く（3.6）。
-- busybox 化の時に足す物（今回は決めない）: `tools.<名前>.module`、振り分けの file の雛形、wrapper の同じ process での実行（5.3）。
+- busybox 化（版 0.3.0。5.4）で足した物: `tools.<名前>.module`（`config.rs`・schema）、振り分けの file の雛形（`wrapper/dispatch.mjs`）と生成（`generate.rs`）、wrapper の起動の向け先。同じ process での実行は採らなかった。
 
 ---
