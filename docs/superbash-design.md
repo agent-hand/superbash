@@ -59,7 +59,7 @@ superbash [option...] <toolset>
 | 指定 | 実行できる command |
 |---|---|
 | 指定無し | toolset の全 command |
-| `--allow-cmd 'cmdA,cmdB'` | `cmdA` と `cmdB` だけ |
+| `--allow-cmd 'cmdA,cmdB'` | `cmdA` と `cmdB` だけ。名前は並びの名前（3.4）で、群の名前ならその下の全部、葉の名前ならその葉だけ（例 `--allow-cmd 'github release,gitea repo create'`）。知らない名前は警告だけ。install の mode で絞れるのは tool の bin の単位まで |
 | `--allow-cmd ''` | 無し（MCP の mode では実行できる command 無しで起動する。将来の、道具を呼ぶ時の許可の処理に対応させるため。install の mode では入れる command 無し） |
 
 ### 流れ（MCP の mode）
@@ -96,7 +96,7 @@ superbash <toolset> [--allow-cmd …]
 ### 実行
 
 - 呼ばれた道具の `name` と `args` を wrapper に渡す: `npx --yes --package=<生成した tarball の path> -- <wrapper の bin> <name> <args の JSON>`。superbash はこれを shell を通さずに起動する。
-- wrapper は `spec.in` の規則で argv の配列を組み、command の bin を shell を通さずに起動する。
+- wrapper は並びの名前で葉を引き、`spec.in` の規則で argv の配列を組み（4 章）、command の bin を shell を通さずに起動する。
 - 上限・background の扱いは 4 章。
 
 ### only-install の mode
@@ -122,7 +122,7 @@ superbash <toolset> [--allow-cmd …]
 
 ## 3. toolset と定義の形式
 
-toolset の作法（サブコマンド・道具ごとの dir・citty・busybox の土台）は docs/toolset-convention.md。
+toolset の作法（サブコマンド・道具ごとの dir・citty・busybox の土台。決定の理由と別の案）は docs/toolset-convention.md。この章はその作法のうち superbash が読む形を書く（版 0.2.0 から）。
 
 ### 3.1 toolset の構造
 
@@ -159,10 +159,10 @@ toolset の作法（サブコマンド・道具ごとの dir・citty・busybox �
 | `plugins/<name>/` | `tools/<name>/` |
 | `$schema` / `name` / `description` / `owner` | 同じ |
 | `plugins[]` | `commands[]` |
-| `plugins[].name` | `commands[].name`（command の名前。`--allow-cmd` と道具の `name` に使う） |
+| `plugins[].name` | `commands[].name`（上の要素の名前。並びの名前の先頭。`--allow-cmd` と道具の `name` に使う） |
 | `plugins[].description` / `category` | 同じ |
 | `plugins[].source` | `commands[].tool`（`tools/<name>` の `<name>`）と `tools.<name>.entry`（入口） |
-| （無し） | `commands[].version`・`commands[].spec`（`subcommand`・`usage`・`in`・`out`） |
+| （無し） | `commands[].version`・`commands[].spec`（`subcommand`・`usage`・`in`・`out`）・`commands[].subcommands`（サブコマンド。下の要素の配列） |
 
 ### 3.3 例（`.manifest/toolconfig.json`）
 
@@ -212,22 +212,75 @@ toolset の作法（サブコマンド・道具ごとの dir・citty・busybox �
 lint-cli check --fix src
 ```
 
+サブコマンドを持つ例（github → release → create の 3 段。全文は docs/toolset-convention.md の 3.4）:
+
+```json
+{
+  "tools": { "publish": { "entry": "dist/cli.mjs" } },
+  "commands": [
+    {
+      "name": "github",
+      "description": "GitHub の repo と release を作る",
+      "tool": "publish",
+      "spec": { "subcommand": "github" },
+      "subcommands": [
+        {
+          "name": "release",
+          "description": "release の操作",
+          "subcommands": [
+            {
+              "name": "create",
+              "description": "release を作る",
+              "spec": {
+                "usage": "publish github release create [--title <title>] [--draft] <repo> <tag>",
+                "in": {
+                  "options": {
+                    "title": { "flag": "--title", "type": "string" },
+                    "draft": { "flag": "--draft", "type": "boolean" }
+                  },
+                  "positionals": [
+                    { "name": "repo", "type": "string" },
+                    { "name": "tag", "type": "string" }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`superbash-command(name="github release create", args={"title": "v1.0.0", "draft": true, "repo": "example/app", "tag": "v1.0.0"})` で呼ばれた時の argv:
+
+```
+publish github release create --title v1.0.0 --draft -- example/app v1.0.0
+```
+
 ### 3.4 項目
 
 - `tools.<name>.entry`: `tools/<name>/` からの相対 path の入口（package.json に bin を並べないので、ここが入口の正本）。
-- `commands[].name`: command の名前。
-- `commands[].tool`: `tools` の key。
-- `commands[].version`: その command の版。書き手が指定する。
-- `commands[].spec`:
+- 要素: `commands[]` の 1 つ（上の要素）か、その下の `subcommands[]` の 1 つ。同じ形の要素の配列を入れ子に何段でも持てる。子を持つ要素を群、持たない要素を葉と呼ぶ。
+- `commands[].name`: 上の要素の名前。サブコマンドの `name` はその要素の名前（argv の語にもなる）。
+- `commands[].tool`: `tools` の key（上の要素だけ。下の要素は上の要素の tool）。
+- `commands[].version`: その command の版。書き手が指定する（上の要素だけ）。
+- `subcommands`: 子の要素の配列（上の要素・下の要素のどちらにも持てる）。
+- `spec`（葉は必須、群は省ける）:
 
 | 項目 | 意味 |
 |---|---|
-| `subcommand` | 使う副 command の名前 |
+| `subcommand` | bin の直後に付ける語（上の要素だけ。下の要素の `spec` には書けない） |
 | `usage` | 1 行の使い方 |
-| `in` | 入力の定義。wrapper はこの規則で args（JSON）を command の普通の引数に組み立てる（形は 3.3 の提案） |
+| `in` | 入力の定義。wrapper はこの規則で args（JSON）を command の普通の引数に組み立てる（形は 3.3 の提案）。args は呼ぶ葉の `in` だけで読む（群の `in` は子を呼ぶ時には使わない） |
 | `out` | 出力の定義（stdout の形式と説明・stderr の説明・終了 code の意味） |
 
-- **help**: すべての command は必須の副 command `help` を持ち、`spec` の内容を出す。superbash は起動の時に `help` を実行して定義と照合しない（定義を正とする）。
+- **並びの名前**: 上の要素から、その要素までの `name` を上から順に空白で区切って並べた物（例 `github release create`）。道具の `name`・`--allow-cmd` の名前に使う。前後の空白は捨て、続いた空白は 1 つの区切りとして読む。上の要素だけなら今の名前と同じ（`subcommands` の無い今の形の toolset は、そのまま動く）。
+- **検査**: 兄弟の `name` は重ならない。`name` に空白を含めない。`spec.subcommand` は上の要素だけ。葉は `spec` が必須。呼べるのは葉だけ（群を呼ぶと、子の名前の一覧を誤りで返す）。
+- **help**: bin の直後の語 `help` は予約（`<bin> help [<並びの名前>]` が spec の内容を出す。上の要素の `spec.subcommand` と、`spec.subcommand` の無い上の要素の 1 段目の子の名前には使えない）。すべての bin はこの `help` を持つ。superbash は起動の時に `help` を実行して定義と照合しない（定義を正とする）。
+- **宛先**: manifest（`description`・`usage` の例を含む）・`tools/<名前>/` の code・toolset の host の設定に、ネットワークの宛先・アドレスを書かない（作法。superbash は見分けて検査しない）。
+- **道具ごとの dir**: `tools/<名前>/` の推奨構成（`src/main.ts`・`src/cli.ts`・`src/command/`・build の結果 `dist/cli.mjs` を entry が指す）と、TS で書く時の citty の書き方は docs/toolset-convention.md の 4 章。superbash は `tools/<名前>/` の中だけを生成した package に写す。
 
 ### 3.5 npm・npx の実測（この Mac。node 26.8.2・npm 11.19.1。使い捨ての dir・prefix・cache で確かめた）
 
@@ -288,7 +341,17 @@ registry（verdaccio など）はこの Mac に無く、registry から取る形
 ## 4. 実行の規則
 
 1. **shell を通さない。** superbash は npx を、wrapper は command の bin を、引数の配列で直接起動する（npx の中で shell を 1 段通る事は 3.5 の (5)）。
-2. **引数。** wrapper が `spec.in` の規則で args（JSON）から argv の配列を組む。
+2. **引数。** wrapper が並びの名前で葉を引き（群・知らない名前・葉の下の名前は使い方の誤り。終了 code 2）、args（JSON）から argv の配列を組む。args は呼ぶ葉の `spec.in` だけで読む。
+
+```
+argv = [上の要素の spec.subcommand（あれば）]
+     + [上の要素より下の、呼ぶ葉までの name（上から順）]
+     + options（定義の順）
+     + [`--`]（positional を 1 つでも渡す時だけ）
+     + positionals（定義の順）
+```
+
+   `--` を入れるのは、`-` で始まる値が option と読まれず、1 引数のまま届くため（command は `--` を受ける事）。子の無い上の要素では、`spec.subcommand` + options + `--` + positionals になる。
 3. **作業 dir。** 基点は決めない。path による拒絶もしない。
 4. **時間の上限。** 既定は全 command 共通で 10 分。呼ぶ時にその実行の上限を指定できる。
 5. **background。** 振る舞いは Claude Code の普通の Bash と同じ: 呼ぶ時に background の実行を指定でき、後から出力を読める。読み方の形は 6 章。
@@ -312,12 +375,13 @@ registry（verdaccio など）はこの Mac に無く、registry から取る形
 
 | 引数 | 意味 |
 |---|---|
-| `name` | command の名前（`commands[].name`） |
+| `name` | command の名前。サブコマンドは空白で区切った並び（例 `github release create`）。呼べるのは葉だけ |
 | `args` | command への引数（JSON）。wrapper が `spec.in` の規則で普通の引数に組み立てる |
 | `timeout` | この実行の時間の上限。省略時は 10 分 |
 | `run_in_background` | background で実行する |
 
-- 道具の説明に、実行できる command の一覧（名前・`description`・`usage`・`in`・`out`）を入れる（model が `name` と `args` を書けるように）。
+- 道具の説明に、実行できる command を木の形で並べる（model が `name` と `args` を書けるように）。葉は `name`・`description`・`usage`・`in` を全部、`out` は短く（`stdout.format` と終了 code の意味だけ。`stdout.description` の長文は外す）。群は `name`・`description` と子。下の要素の葉には、呼ぶ時の `name`（並びの名前）を添える。量が増える時は `--allow-cmd` で群の単位に絞る。
+- 道具の input schema の `name` の説明に「サブコマンドは空白で区切った並び」を書く。
 
 ### 返り値
 
@@ -327,6 +391,7 @@ registry（verdaccio など）はこの Mac に無く、registry から取る形
 ### 失敗の形
 
 - 実行できない `name`（toolset に無い・`--allow-cmd` に無い・`--allow-cmd ''` で起動した時）は、error として返す。
+- 群の `name` は、子の名前の一覧を添えた error として返す（呼べるのは葉だけ）。
 - 時間の上限を超えた時は、止めて、その時までの出力と「時間切れ」を返す。
 
 ---

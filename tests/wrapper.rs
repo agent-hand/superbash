@@ -49,7 +49,7 @@ fn argv_is_built_by_spec_in_and_special_values_stay_one_arg() {
     let (argv, out) = run(&sb, &tgz, "lint", r#"{"fix":true,"target":"src"}"#);
     assert_eq!(
         argv,
-        ["check", "--fix", "src"],
+        ["check", "--fix", "--", "src"],
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -68,21 +68,24 @@ fn argv_is_built_by_spec_in_and_special_values_stay_one_arg() {
         "count",
         r#"{"more":"m","text":"t","label":"L","limit":5}"#,
     );
-    assert_eq!(argv, ["tally", "--limit", "5", "--label", "L", "t", "m"]);
+    assert_eq!(
+        argv,
+        ["tally", "--limit", "5", "--label", "L", "--", "t", "m"]
+    );
 
     for v in ["a b", "--x", ";ls", "$(id)", "`id`", "a'b", "*", "x\"y"] {
         let args = serde_json::json!({ "target": v, "fix": true }).to_string();
         let (argv, out) = run(&sb, &tgz, "lint", &args);
         assert_eq!(
             argv,
-            ["check", "--fix", v],
+            ["check", "--fix", "--", v],
             "value {v:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
         // 値は option の値としても 1 引数のまま
         let args = serde_json::json!({ "label": v, "text": v }).to_string();
         let (argv, _) = run(&sb, &tgz, "count", &args);
-        assert_eq!(argv, ["tally", "--label", v, v], "value {v:?}");
+        assert_eq!(argv, ["tally", "--label", v, "--", v], "value {v:?}");
     }
 }
 

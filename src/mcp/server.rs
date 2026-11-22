@@ -14,7 +14,7 @@ use rmcp::service::RequestContext;
 use serde_json::{Map, Value, json};
 
 use super::exec::{Outcome, Runner, resolve_timeout};
-use crate::config::{Command, PositionalDef};
+use crate::config::{Command, PositionalDef, Resolved, resolve, split_seq};
 
 pub const TOOL_NAME: &str = "superbash-command";
 
@@ -42,7 +42,7 @@ impl SuperbashServer {
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "実行する command の名前"
+                    "description": "実行する command の名前。サブコマンドは空白で区切った並び（例: \"a b c\"）。呼べるのは葉だけ"
                 },
                 "args": {
                     "type": "object",
@@ -75,16 +75,35 @@ impl SuperbashServer {
         let Some(name) = args.get("name").and_then(Value::as_str) else {
             return error_result("name（string）が必要");
         };
-        if !self.inner.commands.iter().any(|c| c.name == name) {
-            return error_result(&format!(
-                "実行できない command: {name}。実行できる command: [{}]",
-                self.inner
-                    .commands
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+        let words = split_seq(name);
+        let name = words.join(" ");
+        let name = name.as_str();
+        match resolve(&self.inner.commands, &words) {
+            Resolved::Leaf { .. } => {}
+            Resolved::Group(g) => {
+                return error_result(&format!(
+                    "{name} は子を持つ群で、呼べるのは葉だけ。子を指して: [{}]",
+                    g.subcommands
+                        .iter()
+                        .map(|c| c.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            Resolved::NotFound => {
+                let mut leaves = Vec::new();
+                for c in &self.inner.commands {
+                    leaf_sequences(c, "", &mut leaves);
+                }
+                return error_result(&format!(
+                    "実行できない command: {}。実行できる command: [{}]",
+                    args.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .trim(),
+                    leaves.join(", ")
+                ));
+            }
         }
         let args_json = match args.get("args") {
             None | Some(Value::Null) => "{}".to_string(),
@@ -171,47 +190,104 @@ fn ensure_nl(s: &str) -> String {
     }
 }
 
-/// 道具の説明。実行できる command の一覧（名前・description・usage・in・out）を入れる。
+/// 葉の並びの名前を集める。
+fn leaf_sequences(c: &Command, prefix: &str, out: &mut Vec<String>) {
+    let seq = if prefix.is_empty() {
+        c.name.clone()
+    } else {
+        format!("{prefix} {}", c.name)
+    };
+    if c.is_group() {
+        for s in &c.subcommands {
+            leaf_sequences(s, &seq, out);
+        }
+    } else {
+        out.push(seq);
+    }
+}
+
+/// 道具の説明。実行できる command を木の形で並べる（設計 6 章）。
+/// 葉は name・description・usage・in を全部、out は短く（stdout.format と終了 code の意味だけ）。
 pub fn describe_commands(commands: &[Command]) -> String {
     let mut s = String::from(
-        "toolset の command を 1 つ実行する。name に command の名前、args に引数（JSON の object）を渡す。\n",
+        "toolset の command を 1 つ実行する。name に command の名前（サブコマンドは空白で区切った並び）、args に引数（JSON の object）を渡す。\n",
     );
     if commands.is_empty() {
         s.push_str("\n実行できる command は無い。\n");
         return s;
     }
-    s.push_str("\n実行できる command:\n");
+    s.push_str("\n実行できる command（木の形。呼べるのは葉だけ）:\n");
     for c in commands {
-        let _ = writeln!(s, "\n- name: {}", c.name);
-        if let Some(d) = &c.description {
-            let _ = writeln!(s, "  description: {d}");
-        }
-        if let Some(u) = &c.spec.usage {
-            let _ = writeln!(s, "  usage: {u}");
-        }
-        let input = &c.spec.input;
-        if input.options.is_empty() && input.positionals.is_empty() {
-            s.push_str("  in: 引数無し（args は {}）\n");
-        } else {
-            s.push_str("  in:\n");
-            for (key, o) in input.options.iter() {
-                let _ = writeln!(
-                    s,
-                    "    {key} ({:?} option {}){}",
-                    o.ty,
-                    o.flag,
-                    desc_suffix(o.description.as_deref())
-                );
-            }
-            for p in &input.positionals {
-                let _ = writeln!(s, "    {}", positional_line(p));
-            }
-        }
-        if let Some(out) = &c.spec.out {
-            let _ = writeln!(s, "  out: {out}");
-        }
+        write_node(&mut s, c, "", 0);
     }
     s
+}
+
+fn write_node(s: &mut String, c: &Command, prefix: &str, depth: usize) {
+    let seq = if prefix.is_empty() {
+        c.name.clone()
+    } else {
+        format!("{prefix} {}", c.name)
+    };
+    let ind = " ".repeat(depth * 4);
+    let _ = write!(s, "\n{ind}- name: {}", c.name);
+    if depth > 0 && !c.is_group() {
+        let _ = write!(s, "（呼ぶ name: \"{seq}\"）");
+    }
+    s.push('\n');
+    if let Some(d) = &c.description {
+        let _ = writeln!(s, "{ind}  description: {d}");
+    }
+    if c.is_group() {
+        for sub in &c.subcommands {
+            write_node(s, sub, &seq, depth + 1);
+        }
+        return;
+    }
+    let Some(spec) = &c.spec else { return };
+    if let Some(u) = &spec.usage {
+        let _ = writeln!(s, "{ind}  usage: {u}");
+    }
+    let input = &spec.input;
+    if input.options.is_empty() && input.positionals.is_empty() {
+        let _ = writeln!(s, "{ind}  in: 引数無し（args は {{}}）");
+    } else {
+        let _ = writeln!(s, "{ind}  in:");
+        for (key, o) in input.options.iter() {
+            let _ = writeln!(
+                s,
+                "{ind}    {key} ({:?} option {}){}",
+                o.ty,
+                o.flag,
+                desc_suffix(o.description.as_deref())
+            );
+        }
+        for p in &input.positionals {
+            let _ = writeln!(s, "{ind}    {}", positional_line(p));
+        }
+    }
+    if let Some(out) = short_out(spec.out.as_ref()) {
+        let _ = writeln!(s, "{ind}  out: {out}");
+    }
+}
+
+/// out の短い形（stdout.format と終了 code の意味だけ）。
+fn short_out(out: Option<&Value>) -> Option<String> {
+    let out = out?;
+    let mut parts = Vec::new();
+    if let Some(f) = out.pointer("/stdout/format").and_then(Value::as_str) {
+        parts.push(format!("stdout={f}"));
+    }
+    if let Some(codes) = out.get("exitCodes").and_then(Value::as_object) {
+        let list: Vec<String> = codes
+            .iter()
+            .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or_default()))
+            .collect();
+        if !list.is_empty() {
+            parts.push(format!("exit {}", list.join(", ")));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("; "))
 }
 
 fn positional_line(p: &PositionalDef) -> String {

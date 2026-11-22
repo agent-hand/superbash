@@ -13,7 +13,7 @@ MCP の mode（既定）は、Streamable HTTP の MCP server として待ち受�
 
 - 既定の待ち受けは `127.0.0.1:7391`、endpoint は `/mcp`。`--host`・`--port` で変える。`--port 0` は空き port。
 - 起動すると、待ち受けの address を 1 行（stdout）に出す: `superbash: listening on http://127.0.0.1:7391/mcp`
-- `--allow-cmd` と `--only-install` は従来どおり（設計 2 章）。
+- `--allow-cmd` と `--only-install`（設計 2 章）。`--allow-cmd` の名前は並びの名前（空白で区切る）で書ける: 群の名前（`'github release'`）ならその下の全部、葉の名前（`'github release create'`）ならその葉だけ。空白を含むので shell では quote する。知らない名前は警告だけ。`--only-install` で絞れるのは tool の bin の単位まで。
 
 client の設定（Claude Code の例）:
 
@@ -58,6 +58,16 @@ user agent として常駐させる雛形が [contrib/launchd/io.example.superba
 作業 dir（plist の `WorkingDirectory`）: launchd が server を起動する dir になり、そのまま command の作業 dir になる。雛形では `/path/to/workdir` を placeholder にしてある。command を動かしたい dir（例: 作業の repo を置いた dir）に書き換える。省略すると launchd の既定（`/`）になり、「省略時は今の dir」の command は `/` で動くので、既定の作業 dir を決めたいなら必ず指定する。
 
 （古い書き方では `launchctl load <plist>` と `launchctl unload <plist>`。）起動したかは log の address の 1 行で分かる。
+
+## サブコマンド（0.2.0 から）
+
+command は `subcommands`（同じ形の要素の配列。入れ子は何段でも）を持てる。作法は [docs/toolset-convention.md](docs/toolset-convention.md)、読む形は設計 3 章。
+
+- 呼ぶ時の `name` は、空白で区切った並び（例 `github release create`）。呼べるのは葉だけで、群を呼ぶと子の名前の一覧が誤りで返る。`args` は呼ぶ葉の `spec.in` だけで読む。
+- wrapper の argv は、bin の後に `spec.subcommand`（上の要素にあれば）と、上の要素より下の名前の並び、options、`--`、positionals の順。`-` で始まる positional も 1 引数のまま届く（command は `--` を受ける事）。
+- 道具の説明は木の形。葉は `name`・`description`・`usage`・`in` を全部、`out` は `stdout.format` と終了 code の意味だけ。
+- `subcommands` の無い今の形の toolset は、そのまま動く（ただし positional の前に `--` が入る）。
+- 新しい形の toolset は superbash 0.2.0 以上で使う（0.1.2 は `spec` の無い群を「形が不正」で止め、`spec` のある群の `subcommands` は黙って捨てる）。
 
 ## test
 

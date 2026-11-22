@@ -25,15 +25,99 @@ pub struct ToolDef {
     pub entry: String,
 }
 
+/// 要素（設計 3.2）。`commands[]` の 1 つ（上の要素）か、その下の `subcommands[]` の 1 つ。
+/// 同じ形で、`tool`・`category`・`version`・`spec.subcommand` は上の要素だけが持つ。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Command {
     pub name: String,
     pub description: Option<String>,
     pub category: Option<String>,
-    /// `tools` の key
-    pub tool: String,
+    /// `tools` の key（上の要素は必須。検査は validate）
+    pub tool: Option<String>,
     pub version: Option<String>,
-    pub spec: Spec,
+    /// 葉は必須、群（子を持つ要素）は省ける（検査は validate）
+    pub spec: Option<Spec>,
+    #[serde(default)]
+    pub subcommands: Vec<Command>,
+}
+
+impl Command {
+    /// 群（子を持つ要素）か。
+    pub fn is_group(&self) -> bool {
+        !self.subcommands.is_empty()
+    }
+
+    /// 上の要素の `tool`（検査済みの config では必ずある）。
+    pub fn tool_name(&self) -> &str {
+        self.tool.as_deref().unwrap_or_default()
+    }
+}
+
+/// 並びの名前（空白で区切った並び）を語に分ける。前後の空白は捨て、続いた空白は 1 つの区切り。
+pub fn split_seq(name: &str) -> Vec<&str> {
+    name.split_whitespace().collect()
+}
+
+/// 並びの名前を引いた結果。
+#[derive(Debug)]
+pub enum Resolved<'a> {
+    /// 葉。`head` は argv の頭（上の要素の `spec.subcommand` と、上の要素より下の名前）
+    Leaf {
+        node: &'a Command,
+        head: Vec<&'a str>,
+    },
+    /// 群（呼べない）
+    Group(&'a Command),
+    NotFound,
+}
+
+/// 上の要素の並び（`commands`）から、並びの名前の語で要素を引く。
+pub fn resolve<'a>(commands: &'a [Command], words: &[&str]) -> Resolved<'a> {
+    let Some((first, rest)) = words.split_first() else {
+        return Resolved::NotFound;
+    };
+    let Some(top) = commands.iter().find(|c| c.name == *first) else {
+        return Resolved::NotFound;
+    };
+    let mut node = top;
+    let mut head: Vec<&str> = top
+        .spec
+        .as_ref()
+        .and_then(|s| s.subcommand.as_deref())
+        .into_iter()
+        .collect();
+    for w in rest {
+        let Some(child) = node.subcommands.iter().find(|c| c.name == *w) else {
+            return Resolved::NotFound;
+        };
+        head.push(child.name.as_str());
+        node = child;
+    }
+    if node.is_group() {
+        Resolved::Group(node)
+    } else {
+        Resolved::Leaf { node, head }
+    }
+}
+
+/// 群と葉の全部の並びの名前（`--allow-cmd` の名前の照合用）。
+pub fn all_sequences(commands: &[Command]) -> Vec<String> {
+    fn walk(c: &Command, prefix: &str, out: &mut Vec<String>) {
+        let name = if prefix.is_empty() {
+            c.name.clone()
+        } else {
+            format!("{prefix} {}", c.name)
+        };
+        out.push(name.clone());
+        for s in &c.subcommands {
+            walk(s, &name, out);
+        }
+    }
+    let mut out = Vec::new();
+    for c in commands {
+        walk(c, "", &mut out);
+    }
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,19 +222,65 @@ impl ToolConfig {
         Ok(cfg)
     }
 
-    /// 参照の整合（command の名前の重複、tool の参照先）だけを見る。
+    /// 参照の整合と、要素の形の検査（設計 3.2）。
+    /// 兄弟の名前の重複、`name` の空白、`spec.subcommand` は上の要素だけ、葉は `spec` が必須、
+    /// `help`（bin の直後の予約の語）、tool の参照先。
     fn validate(&self) -> Result<()> {
-        let mut seen = std::collections::BTreeSet::new();
+        check_siblings(&self.commands, "")?;
         for c in &self.commands {
-            if !seen.insert(c.name.as_str()) {
-                bail!("command の名前が重複: {}", c.name);
+            let Some(tool) = &c.tool else {
+                bail!("command {} に tool が無い", c.name);
+            };
+            if !self.tools.contains_key(tool) {
+                bail!("command {} の tool {} が tools に無い", c.name, tool);
             }
-            if !self.tools.contains_key(&c.tool) {
-                bail!("command {} の tool {} が tools に無い", c.name, c.tool);
+            // bin の直後の語。spec.subcommand があればそれ、無ければ 1 段目の子の名前。
+            match c.spec.as_ref().and_then(|s| s.subcommand.as_deref()) {
+                Some(HELP) => bail!(
+                    "command {} の spec.subcommand に help は使えない（予約）",
+                    c.name
+                ),
+                Some(_) => {}
+                None => {
+                    if c.subcommands.iter().any(|s| s.name == HELP) {
+                        bail!(
+                            "command {} の子の名前に help は使えない（bin の直後の予約）",
+                            c.name
+                        );
+                    }
+                }
             }
         }
         Ok(())
     }
+}
+
+/// bin の直後の予約の語（設計 3.4・6.9）。
+const HELP: &str = "help";
+
+fn check_siblings(siblings: &[Command], path: &str) -> Result<()> {
+    let mut seen = std::collections::BTreeSet::new();
+    for c in siblings {
+        let full = if path.is_empty() {
+            c.name.clone()
+        } else {
+            format!("{path} {}", c.name)
+        };
+        if c.name.is_empty() || c.name.chars().any(char::is_whitespace) {
+            bail!("name に空白を含められない（空も不可）: {full:?}");
+        }
+        if !seen.insert(c.name.as_str()) {
+            bail!("command の名前が重複: {full}");
+        }
+        if !path.is_empty() && c.spec.as_ref().is_some_and(|s| s.subcommand.is_some()) {
+            bail!("spec.subcommand は上の要素だけ: {full}");
+        }
+        if !c.is_group() && c.spec.is_none() {
+            bail!("葉の要素に spec が必要: {full}");
+        }
+        check_siblings(&c.subcommands, &full)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -169,7 +299,15 @@ mod tests {
     #[test]
     fn minimal_config_loads() {
         let c = parse(OK).unwrap();
-        assert!(c.commands[0].spec.input.positionals.is_empty());
+        assert!(
+            c.commands[0]
+                .spec
+                .as_ref()
+                .unwrap()
+                .input
+                .positionals
+                .is_empty()
+        );
     }
 
     #[test]
@@ -184,6 +322,8 @@ mod tests {
         let c = parse(&json).unwrap();
         let keys: Vec<&str> = c.commands[0]
             .spec
+            .as_ref()
+            .unwrap()
             .input
             .options
             .iter()
@@ -201,5 +341,52 @@ mod tests {
     fn duplicate_command_name_is_error() {
         let dup = OK.replace(r#"]}"#, r#",{"name":"c","tool":"x","spec":{}}]}"#);
         assert!(parse(&dup).is_err());
+    }
+
+    const NESTED: &str = r#"{"name":"t","tools":{"x":{"entry":"main.js"}},
+      "commands":[{"name":"g","tool":"x","spec":{"subcommand":"g"},"subcommands":[
+        {"name":"r","subcommands":[{"name":"c","spec":{}}]}]}]}"#;
+
+    #[test]
+    fn nested_group_without_spec_loads_and_resolves() {
+        let c = parse(NESTED).unwrap();
+        match resolve(&c.commands, &["g", "r", "c"]) {
+            Resolved::Leaf { head, .. } => assert_eq!(head, ["g", "r", "c"]),
+            r => panic!("{r:?}"),
+        }
+        assert!(matches!(
+            resolve(&c.commands, &["g", "r"]),
+            Resolved::Group(_)
+        ));
+        assert!(matches!(
+            resolve(&c.commands, &["g", "x"]),
+            Resolved::NotFound
+        ));
+        assert_eq!(all_sequences(&c.commands), ["g", "g r", "g r c"]);
+    }
+
+    #[test]
+    fn invalid_elements_are_errors() {
+        // 兄弟の重複（子の段）
+        let dup = NESTED.replace(
+            r#"{"name":"c","spec":{}}"#,
+            r#"{"name":"c","spec":{}},{"name":"c","spec":{}}"#,
+        );
+        assert!(parse(&dup).is_err());
+        // name に空白
+        assert!(parse(&NESTED.replace(r#""name":"r""#, r#""name":"r s""#)).is_err());
+        // spec.subcommand は上の要素だけ
+        let sub = NESTED.replace(
+            r#""name":"c","spec":{}"#,
+            r#""name":"c","spec":{"subcommand":"q"}"#,
+        );
+        assert!(parse(&sub).is_err());
+        // 葉に spec が無い
+        assert!(parse(&NESTED.replace(r#","spec":{}}]}]}]}"#, r#"}]}]}]}"#)).is_err());
+        // help の予約
+        assert!(parse(&OK.replace(r#""subcommand":"s""#, r#""subcommand":"help""#)).is_err());
+        let help_child = r#"{"name":"t","tools":{"x":{"entry":"main.js"}},
+          "commands":[{"name":"g","tool":"x","subcommands":[{"name":"help","spec":{}}]}]}"#;
+        assert!(parse(help_child).is_err());
     }
 }

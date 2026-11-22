@@ -1,0 +1,5 @@
+{
+  "name": "nested-tools",
+  "version": "1.0.0",
+  "files": [".manifest/", "tools/"]
+}

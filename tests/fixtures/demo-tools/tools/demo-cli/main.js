@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 // MCP の test 用の command。subcommand ごとに挙動が違う。
-const [sub, ...rest] = process.argv.slice(2);
+const [sub, ...rest0] = process.argv.slice(2);
+// wrapper は positional の前に -- を入れる（設計 4 章）。
+const rest = rest0[0] === '--' ? rest0.slice(1) : rest0;
 if (sub === 'hello') {
   console.log(`hello ${rest[0]}`);
 } else if (sub === 'fail') {
