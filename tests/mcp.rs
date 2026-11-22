@@ -341,3 +341,31 @@ async fn http_endpoint_origin_and_host_checks() {
     assert_eq!(post_status(addr, "/other", &[]).await, 404);
     server.stop().await;
 }
+
+/// 相対 path の toolset は、npm pack の作業 dir ではなく起動した dir（= sb.root）から解く。
+#[tokio::test]
+async fn relative_path_toolset_resolves_from_launch_dir() {
+    for (name, spec) in [
+        ("mcp-relpath-dot", "./probe-tools"),
+        ("mcp-relpath-dotdot", "../mcp-relpath-dotdot/probe-tools"),
+        ("mcp-relpath-file", "file:./probe-tools"),
+        ("mcp-relpath-file-bare", "file:probe-tools"),
+        (
+            "mcp-relpath-file-slash",
+            "file:/../mcp-relpath-file-slash/probe-tools",
+        ),
+    ] {
+        let sb = Sandbox::new(name);
+        copy_dir(&demo(), &sb.root.join("probe-tools"));
+        let c = start(&sb, spec, None).await;
+        let d = description(&c).await;
+        assert!(
+            d.contains("name: hello"),
+            "{spec}: 説明に hello が無い:\n{d}"
+        );
+        let r = call(&c, json!({"name": "hello", "args": {"who": "rel"}})).await;
+        assert!(!is_error(&r), "{spec}: {}", text(&r));
+        assert!(text(&r).contains("hello rel"), "{spec}: {}", text(&r));
+        c.cancel().await.unwrap();
+    }
+}
