@@ -122,6 +122,8 @@ superbash <toolset> [--allow-cmd …]
 
 ## 3. toolset と定義の形式
 
+toolset の作法（サブコマンド・道具ごとの dir・citty・busybox の土台）は docs/toolset-convention.md。
+
 ### 3.1 toolset の構造
 
 ```
