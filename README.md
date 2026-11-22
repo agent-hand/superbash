@@ -18,8 +18,14 @@ MCP の mode（既定）は、Streamable HTTP の MCP server として待ち受�
 client の設定（Claude Code の例）:
 
 ```json
-{ "mcpServers": { "superbash": { "type": "http", "url": "http://127.0.0.1:7391/mcp" } } }
+{ "mcpServers": { "superbash": { "type": "http", "url": "http://127.0.0.1:7391/mcp", "timeout": 660000 } } }
 ```
+
+#### 長い command と呼び出しの上限
+
+- Claude Code は http の MCP の 1 回の呼び出しを、既定で 60 秒で打ち切る（進み具合の通知では延びない）。設定の `timeout`（ms）で延ばせる。上の例の `"timeout": 660000`（11 分）は、superbash の既定の command の時間の上限（10 分）より少し長い。
+- 数十秒以上かかりうる command（build・publish など）は、`run_in_background: true` で呼ぶ。
+- 打ち切られても、command は最後まで走る（呼び出しが切れても、command の process は止まらない）。「時間切れ」と出ても、結果は出ている事がある。公開・作成のように呼び直すと二重になる command は、呼び直す前に結果（公開されたか・作られたか）を確かめる。
 
 ### command の作業 dir
 
