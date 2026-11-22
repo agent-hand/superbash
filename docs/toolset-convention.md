@@ -41,7 +41,7 @@
 | 3 | toolset は道具ごとの dir（`tools/<名前>/`）を守る。その下の推奨構成を決める（例 `src/index.ts` か `src/main.ts`、`src/command/<サブコマンド>.ts`。file の名前はどちらでもよい）。toolset の command を TS で作る時は citty を使う。 |
 | 4 | busybox 化の土台を、この作法の上で考える（社内の参考実装は参照に留める）。 |
 | 5 | command と toolset（の host の設定）は、ネットワークの宛先・アドレスを持たない。 |
-| 6 | 公開の操作の command も、サブコマンドの形で組む: `npm` → `publish`、`github` → `repo create`・`release create`、`gitea` → `repo create`・`release create`。今の 6 つ（`npm-publish`・`verdaccio-publish`・`github-repo-create`・`github-release-create`・`gitea-repo-create`・`gitea-release-create`）はこの形に移す（移し方は 6.4 の未決）。 |
+| 6 | 公開の操作の command も、サブコマンドの形で組む: `npm` → `publish`、`github` → `repo create`・`release create`、`gitea` → `repo create`・`release create`。今の 6 つ（`npm-publish`・`verdaccio-publish`・`github-repo-create`・`github-release-create`・`gitea-repo-create`・`gitea-release-create`）はこの形に移す（移し方は 6.4 で決定）。 |
 
 設計から引き継ぐ事（変えない）:
 
@@ -94,7 +94,7 @@
 検査（決定（推奨どおり））:
 
 - 同じ親の下の `name` は重ならない（今の「command の名前が重複しない」を各段に広げる）。
-- `name` に空白を含めない（6.1 の推奨の指し方のため）。
+- `name` に空白を含めない（6.1 の決定の指し方のため）。
 - `spec.subcommand` は上の要素だけ。
 - 呼べるのは葉だけ（6.8）。
 
@@ -471,7 +471,7 @@ busybox 化の土台:
 
 **決定: (c)。** 理由: superbash の今の流れ（取得 → 写す → npx）を変えずに動き、npx の時に registry に行かない。
 
-`dist/` の置き方（(c) の中の小さな未決）:
+`dist/` の置き方（(c) の中の小さな決定）:
 
 | 案 | 利点 | 欠点 |
 |---|---|---|
