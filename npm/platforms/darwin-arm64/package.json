@@ -1,6 +1,6 @@
 {
   "name": "superbash-darwin-arm64",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "superbash の darwin arm64 用の実行 file",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/agent-hand/superbash.git" },

@@ -22,6 +22,9 @@ use crate::npm::Npm;
 pub const WRAPPER_BIN: &str = "superbash-run";
 const WRAPPER_PATH: &str = "wrapper/run.js";
 const WRAPPER_SRC: &str = include_str!("../wrapper/run.js");
+/// 振り分けの file（module のある tool がある時だけ置く。作法 5.4）。
+pub const DISPATCH_PATH: &str = "dispatch/run.mjs";
+const DISPATCH_SRC: &str = include_str!("../wrapper/dispatch.mjs");
 
 pub struct GenerateInput<'a> {
     /// 展開した toolset の root
@@ -53,8 +56,14 @@ pub fn generate(npm: &Npm, input: &GenerateInput) -> Result<Generated> {
     let mut bins: BTreeMap<String, String> = BTreeMap::new();
     for c in &selected {
         let tool = c.tool_name();
-        let entry = &input.config.tools[tool].entry;
-        bins.insert(tool.to_string(), format!("tools/{tool}/{entry}"));
+        let def = &input.config.tools[tool];
+        // module のある tool の bin は振り分けの file。無ければ entry を直に向ける（互換）。
+        let target = if def.module.is_some() {
+            DISPATCH_PATH.to_string()
+        } else {
+            format!("tools/{tool}/{}", def.entry)
+        };
+        bins.insert(tool.to_string(), target);
     }
     if input.with_wrapper {
         if bins.contains_key(WRAPPER_BIN) {
@@ -169,6 +178,17 @@ fn build_package(
     fs::create_dir_all(dst.parent().unwrap())?;
     fs::copy(input.toolset_dir.join(TOOLCONFIG_PATH), &dst)?;
 
+    // 振り分けの file（module のある tool が 1 つでもある時）
+    if selected
+        .iter()
+        .any(|c| input.config.tools[c.tool_name()].module.is_some())
+    {
+        let d = pkg.join(DISPATCH_PATH);
+        fs::create_dir_all(d.parent().unwrap())?;
+        fs::write(&d, DISPATCH_SRC)?;
+        fs::set_permissions(&d, fs::Permissions::from_mode(0o755))?;
+    }
+
     // wrapper
     if input.with_wrapper {
         let w = pkg.join(WRAPPER_PATH);
@@ -197,7 +217,7 @@ fn build_package(
 /// package の dir の中身の hash（sha256 の hex）。
 /// 入れる物: 各 entry の相対 path（名前順）・種別・実行の権限・file の中身・symlink の向き先、
 /// と superbash 自身の版。package.json（名前・版・bin・dependencies）・tools の code・
-/// toolconfig・wrapper（MCP の mode だけ）は dir の中身なので、--allow-cmd と mode の違いも中身に出る。
+/// toolconfig・振り分けの file（module のある tool がある時だけ）・wrapper（MCP の mode だけ）は dir の中身なので、--allow-cmd と mode の違いも中身に出る。
 fn hash_dir(root: &Path) -> Result<String> {
     let mut h = Sha256::new();
     h.update(b"superbash\0");

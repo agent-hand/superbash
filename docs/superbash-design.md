@@ -90,13 +90,14 @@ superbash <toolset> [--allow-cmd …]
   - `tools/<name>/`: 取った toolset から写す。
   - `.manifest/toolconfig.json`: 写す（wrapper が spec を読むため）。
   - wrapper: MCP の mode 用。command 名と args（JSON）を受け、`toolconfig.json` の `spec.in` の規則で command の普通の引数に組み立て、command を起動する。
+  - 振り分けの file（`dispatch/run.mjs`。版 0.3.0 の busybox 化）: `tools.<name>.module` のある tool が 1 つでもある時だけ置く。そのような tool の `bin` はこの file を向く。呼ばれた link の名前（only-install）か第 1 引数（MCP の mode の wrapper が tool の名前を最初に渡す）で tool を選び、module の `run(rawArgs)` が返す数を終了 code にする。module の無い tool は今のとおり入口を直に起動する。決めた方式は docs/toolset-convention.md の 5.4。
 - `npm pack` で tarball にし、npx にはこの tarball の path を渡す（tarball を渡すと npm は `_npx` の下に展開した写しを作る。名前@版の指定では、registry に無い package は引けない。3.5）。
 - command は普通の CLI のまま。MCP のための作法（JSON の引数）は wrapper だけが持つ。
 
 ### 実行
 
 - 呼ばれた道具の `name` と `args` を wrapper に渡す: `npx --yes --package=<生成した tarball の path> -- <wrapper の bin> <name> <args の JSON>`。superbash はこれを shell を通さずに起動する。
-- wrapper は並びの名前で葉を引き、`spec.in` の規則で argv の配列を組み（4 章）、command の bin を shell を通さずに起動する。
+- wrapper は並びの名前で葉を引き、`spec.in` の規則で argv の配列を組み（4 章）、command の bin を shell を通さずに起動する。module のある tool は、振り分けの file を `<tool の名前> <argv>` で起動する（子の process を起こす点は同じ。同じ process では実行しない）。
 - 上限・background の扱いは 4 章。
 
 ### only-install の mode
@@ -113,7 +114,7 @@ superbash <toolset> [--allow-cmd …]
 
 利用者が「今の案」として示した、superbash に一括で手当てさせる理由:
 
-1. **busybox 化**: superbash が command を用意する工程で、command 群を busybox のような 1 つの多機能の実行 file にまとめる。
+1. **busybox 化**: superbash が command を用意する工程で、command 群を busybox のような 1 つの多機能の実行 file にまとめる。（0.3.0 で、まとめる先を「1 つの実行 file」ではなく「1 つの振り分けの file」に決めて実装した。docs/toolset-convention.md の 5.4。single executable application は作らない。）
 2. **sandbox の中での実行**: superbash が、sandbox の中で実行する command 群を組み立てる。
 
 どちらも、toolset の取得から command の用意までを superbash が 1 か所で持つ事でできる。実現の方式（対象の言語・build の場所・OS ごとの sandbox の仕組みの差）はまだ決めていない。
@@ -262,6 +263,7 @@ publish github release create --title v1.0.0 --draft -- example/app v1.0.0
 ### 3.4 項目
 
 - `tools.<name>.entry`: `tools/<name>/` からの相対 path の入口（package.json に bin を並べないので、ここが入口の正本）。
+- `tools.<name>.module`（省ける。0.3.0 から）: `tools/<name>/` からの相対 path の module。読み込んでも走らず、`main`（citty の command）と `run(rawArgs: string[]): Promise<number>` を export する。あれば `bin` と wrapper は振り分けの file（`dispatch/run.mjs`）を通る。
 - 要素: `commands[]` の 1 つ（上の要素）か、その下の `subcommands[]` の 1 つ。同じ形の要素の配列を入れ子に何段でも持てる。子を持つ要素を群、持たない要素を葉と呼ぶ。
 - `commands[].name`: 上の要素の名前。サブコマンドの `name` はその要素の名前（argv の語にもなる）。
 - `commands[].tool`: `tools` の key（上の要素だけ。下の要素は上の要素の tool）。

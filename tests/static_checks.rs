@@ -8,7 +8,10 @@ fn files(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.unwrap().path();
         if p.is_dir() {
             files(&p, out);
-        } else if matches!(p.extension().and_then(|e| e.to_str()), Some("rs" | "js")) {
+        } else if matches!(
+            p.extension().and_then(|e| e.to_str()),
+            Some("rs" | "js" | "mjs")
+        ) {
             out.push(p);
         }
     }

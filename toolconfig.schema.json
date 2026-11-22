@@ -22,7 +22,8 @@
       "type": "object",
       "required": ["entry"],
       "properties": {
-        "entry": { "description": "tools/<name>/ からの相対 path の入口", "type": "string", "minLength": 1 }
+        "entry": { "description": "tools/<name>/ からの相対 path の入口", "type": "string", "minLength": 1 },
+        "module": { "description": "tools/<name>/ からの相対 path の module。読み込んでも走らず、main（citty の command）と run(rawArgs): Promise<number> を export する。あれば振り分けの file から呼ばれる（docs/toolset-convention.md 5.4）", "type": "string", "minLength": 1 }
       }
     },
     "command": {

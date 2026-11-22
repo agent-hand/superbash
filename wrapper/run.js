@@ -108,9 +108,13 @@ function main(argv) {
     throw new UsageError(`args が JSON でない: ${e.message}`);
   }
   const childArgv = buildArgv(node, args, head);
-  const entry = path.join(ROOT, 'tools', top.tool, config.tools[top.tool].entry);
+  const def = config.tools[top.tool];
+  // module のある tool は、振り分けの file を tool の名前つきで起動する。無ければ entry を直に起動する（互換）。
+  const [program, programArgv] = def.module
+    ? [path.join(ROOT, 'dispatch', 'run.mjs'), [top.tool, ...childArgv]]
+    : [path.join(ROOT, 'tools', top.tool, def.entry), childArgv];
 
-  const child = spawn(entry, childArgv, { stdio: 'inherit' }); // shell を通さない
+  const child = spawn(program, programArgv, { stdio: 'inherit' }); // shell を通さない
   child.on('error', (e) => {
     process.stderr.write(`superbash-run: 起動できない: ${e.message}\n`);
     process.exit(127);
