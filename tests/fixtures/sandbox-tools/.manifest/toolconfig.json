@@ -1,0 +1,142 @@
+{
+  "name": "sandbox-tools",
+  "description": "sandbox の test 用の toolset",
+  "tools": {
+    "sbx-default": {
+      "entry": "main.js"
+    },
+    "sbx-net-off": {
+      "entry": "main.js",
+      "sandbox": {
+        "write": [
+          "~/allowed",
+          "$TMPDIR/sbx"
+        ],
+        "network": false
+      }
+    },
+    "sbx-net-on": {
+      "entry": "main.js",
+      "sandbox": {
+        "write": [
+          "~/allowed"
+        ],
+        "network": true
+      }
+    }
+  },
+  "commands": [
+    {
+      "name": "default-write",
+      "description": "sbx-default: write",
+      "tool": "sbx-default",
+      "spec": {
+        "subcommand": "write",
+        "in": {
+          "positionals": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "default-connect",
+      "description": "sbx-default: connect",
+      "tool": "sbx-default",
+      "spec": {
+        "subcommand": "connect",
+        "in": {
+          "positionals": [
+            {
+              "name": "port",
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "net-off-write",
+      "description": "sbx-net-off: write",
+      "tool": "sbx-net-off",
+      "spec": {
+        "subcommand": "write",
+        "in": {
+          "positionals": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "net-off-connect",
+      "description": "sbx-net-off: connect",
+      "tool": "sbx-net-off",
+      "spec": {
+        "subcommand": "connect",
+        "in": {
+          "positionals": [
+            {
+              "name": "port",
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "net-on-write",
+      "description": "sbx-net-on: write",
+      "tool": "sbx-net-on",
+      "spec": {
+        "subcommand": "write",
+        "in": {
+          "positionals": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "net-on-connect",
+      "description": "sbx-net-on: connect",
+      "tool": "sbx-net-on",
+      "spec": {
+        "subcommand": "connect",
+        "in": {
+          "positionals": [
+            {
+              "name": "port",
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "default-env",
+      "description": "環境変数を出す",
+      "tool": "sbx-default",
+      "spec": {
+        "subcommand": "env",
+        "in": {
+          "positionals": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

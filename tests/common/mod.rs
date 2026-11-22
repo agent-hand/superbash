@@ -175,6 +175,16 @@ impl Server {
 
 /// superbash を MCP の mode（空き port）で起動し、起動の 1 行から address を知る。
 pub async fn start_server(sb: &Sandbox, toolset: impl AsRef<OsStr>, allow: Option<&str>) -> Server {
+    start_server_with(sb, toolset, allow, &[]).await
+}
+
+/// `start_server` に、起動の option（例 `--sandbox`）を足す。
+pub async fn start_server_with(
+    sb: &Sandbox,
+    toolset: impl AsRef<OsStr>,
+    allow: Option<&str>,
+    extra: &[&str],
+) -> Server {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_superbash"));
@@ -184,7 +194,8 @@ pub async fn start_server(sb: &Sandbox, toolset: impl AsRef<OsStr>, allow: Optio
         cmd.env(k, v);
     }
     cmd.current_dir(&sb.root)
-        .args(["--host", "127.0.0.1", "--port", "0"]);
+        .args(["--host", "127.0.0.1", "--port", "0"])
+        .args(extra);
     if let Some(a) = allow {
         cmd.arg("--allow-cmd").arg(a);
     }
@@ -245,7 +256,17 @@ impl Client {
 
 /// superbash を MCP の mode で起動し、Streamable HTTP の MCP client として繋ぐ（使い捨ての cache・prefix）。
 pub async fn start(sb: &Sandbox, toolset: impl AsRef<OsStr>, allow: Option<&str>) -> Client {
-    let server = start_server(sb, toolset, allow).await;
+    start_with(sb, toolset, allow, &[]).await
+}
+
+/// `start` に、起動の option を足す。
+pub async fn start_with(
+    sb: &Sandbox,
+    toolset: impl AsRef<OsStr>,
+    allow: Option<&str>,
+    extra: &[&str],
+) -> Client {
+    let server = start_server_with(sb, toolset, allow, extra).await;
     let inner =
         ().serve(StreamableHttpClientTransport::from_uri(server.url()))
             .await

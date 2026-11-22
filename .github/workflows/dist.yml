@@ -52,6 +52,39 @@ jobs:
             kill "$(cat "$RUNNER_TEMP/registry-e2e/verdaccio.pid")" 2>/dev/null || true
           fi
 
+  sandbox:
+    name: sandbox-${{ matrix.key }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: linux-x64, runner: ubuntu-24.04 }
+          - { key: darwin-arm64, runner: macos-15 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: bubblewrap を入れる（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # ubuntu 24.04 は非特権の user namespace を AppArmor で制限する。test のために許す（runner の中だけ）
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --version
+      - name: sandbox の test（仕組みが使えて skip にならなかった事も確かめる）
+        shell: bash
+        run: |
+          cargo test --test sandbox -- --nocapture 2>&1 | tee "$RUNNER_TEMP/sandbox-test.log"
+          cargo test --lib sandbox
+          if grep -q "SKIP: sandbox が使えない" "$RUNNER_TEMP/sandbox-test.log"; then
+            echo "sandbox の実機 test が skip になった"; exit 1
+          fi
+
   npm-packages:
     name: npm-packages
     needs: npx-smoke

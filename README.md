@@ -78,6 +78,28 @@ tool は、実行の入口（`entry`）に加えて、読み込んでも走ら�
 - `module` の無い tool は、今のまま入口を直に起動する（互換）。
 - 決めた方式は [docs/toolset-convention.md](docs/toolset-convention.md) の 5.4。
 
+## sandbox（0.4.0 から）
+
+`superbash --sandbox <toolset>`（MCP の mode だけ）で、tool の process を sandbox の中で起こす。絞るのは書き込みとネットワークだけで、読み取りは絞らない。既定は無し（今のとおり）。
+
+- 仕組み: macOS は `/usr/bin/sandbox-exec`（superbash が profile を生成）、Linux は PATH の `bwrap`（bubblewrap。例 `apt install bubblewrap`）。仕組みが無い・使えない時は、起動の時に理由を出して終了する。
+- 方針は manifest の `tools.<名前>.sandbox`:
+
+```json
+"tools": {
+  "build-cli": {
+    "entry": "main.js",
+    "sandbox": { "write": ["~/.cache/build", "$TMPDIR", "./out"], "network": false }
+  }
+}
+```
+
+  - `write`: 書き込みを許す path。`~`・`$TMPDIR`・`.`（superbash の作業 dir）で始められ、展開は superbash が行う。それ以外は絶対 path。
+  - `network`: 外への通信を許すか（既定 false）。宛先・アドレスは書けない。
+  - 項が無い tool: network false、write は superbash の置き場（生成した package・background の出力）と一時の dir だけ。項がある tool の write は書いた物だけ。
+- `--only-install` とは一緒に使えない。
+- 方式の詳細は [docs/superbash-design.md](docs/superbash-design.md) の 2 章。
+
 ## test
 
 ```

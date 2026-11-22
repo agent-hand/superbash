@@ -23,7 +23,21 @@
       "required": ["entry"],
       "properties": {
         "entry": { "description": "tools/<name>/ からの相対 path の入口", "type": "string", "minLength": 1 },
-        "module": { "description": "tools/<name>/ からの相対 path の module。読み込んでも走らず、main（citty の command）と run(rawArgs): Promise<number> を export する。あれば振り分けの file から呼ばれる（docs/toolset-convention.md 5.4）", "type": "string", "minLength": 1 }
+        "module": { "description": "tools/<name>/ からの相対 path の module。読み込んでも走らず、main（citty の command）と run(rawArgs): Promise<number> を export する。あれば振り分けの file から呼ばれる（docs/toolset-convention.md 5.4）", "type": "string", "minLength": 1 },
+        "sandbox": { "$ref": "#/definitions/sandbox" }
+      }
+    },
+    "sandbox": {
+      "description": "superbash --sandbox の時のこの tool の方針。絞るのは書き込みとネットワークだけ（読み取りは絞らない）。宛先・アドレスは書かない。項が無い tool の既定は network false、write は superbash の置き場と一時の dir だけ。docs/superbash-design.md の 2 章",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "write": {
+          "description": "書き込みを許す path。`~`（home）・`$TMPDIR`・`.`（superbash の作業 dir）で始められる。それ以外は絶対 path",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(/|~(/|$)|\\$TMPDIR(/|$)|\\.(/|$))" }
+        },
+        "network": { "description": "外への通信を許すか（既定 false）", "type": "boolean" }
       }
     },
     "command": {
